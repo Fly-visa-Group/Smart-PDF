@@ -22,7 +22,7 @@ const ToolPage = () => {
     'read': { title: 'Đọc PDF', formats: ['PDF'] },
   };
 
-  const config = toolConfig[toolId] || { title: 'Công cụ', formats: ['PDF'] };
+const config = toolConfig[toolId] || { title: 'Công cụ', formats: ['PDF'] };
 
   // Global drag listener for initial state
   useEffect(() => {

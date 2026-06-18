@@ -73,6 +73,14 @@ async def api_compress(
     level: str = Form("medium")
 ):
     try:
+        # Validate file type - only PDF allowed
+        filename = file.filename or ""
+        if not filename.lower().endswith('.pdf'):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File không hợp lệ: '{filename}'. Công cụ Nén PDF chỉ hỗ trợ file PDF (.pdf)."
+            )
+        
         content = await file.read()
         compressed = compress_pdf(content, level=level)
         return StreamingResponse(

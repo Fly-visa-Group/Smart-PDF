@@ -11,6 +11,28 @@ const CompressWorkspace = ({ initialFiles, onCancel }) => {
   const [result, setResult] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
 
+// Validate file type - only PDF allowed
+  const isPdfFile = file && file.name.toLowerCase().endsWith('.pdf');
+
+  // Show invalid file type error - only check once, not in render loop
+  if (file && !isPdfFile && status === 'idle') {
+    return (
+      <div style={{ maxWidth: 500, margin: '80px auto', padding: 30, background: '#fff', borderRadius: 12, boxShadow: '0 4px 20px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+        <div style={{ width: 64, height: 64, background: '#fff5f5', color: '#e53e3e', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
+          <Minimize2 size={32} />
+        </div>
+        <h3 style={{ fontSize: 19, fontWeight: 700, color: '#2d3748', marginBottom: 8 }}>File không hợp lệ!</h3>
+        <p style={{ fontSize: 13, color: '#718096', wordBreak: 'break-all', marginBottom: 16 }}>File: <strong>{file.name}</strong></p>
+        <p style={{ fontSize: 14, color: '#e53e3e', marginBottom: 24 }}>
+          Công cụ <strong>Nén PDF</strong> chỉ hỗ trợ file PDF (.pdf).<br/> File bạn chọn là <strong>{file.name.split('.').pop().toUpperCase()}</strong> - không thể nén được!
+        </p>
+        <button className="btn btn-outline" onClick={onCancel}>
+          Chọn file PDF khác
+        </button>
+      </div>
+    );
+  }
+
   const formatSize = (bytes) => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -46,10 +68,11 @@ const CompressWorkspace = ({ initialFiles, onCancel }) => {
         body: formData,
       });
 
-      clearInterval(interval);
+clearInterval(interval);
 
       if (!res.ok) {
-        throw new Error('Nén file thất bại. Vui lòng thử lại.');
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Nén file thất bại. Vui lòng thử lại.');
       }
 
       const blob = await res.blob();
@@ -182,7 +205,7 @@ const CompressWorkspace = ({ initialFiles, onCancel }) => {
           </div>
         </label>
 
-        {/* Option 2: Extreme */}
+{/* Option 2: Extreme */}
         <label
           style={{
             display: 'flex',
@@ -202,8 +225,33 @@ const CompressWorkspace = ({ initialFiles, onCancel }) => {
             <Zap size={22} />
           </div>
           <div style={{ flex: 1 }}>
-            <strong style={{ display: 'block', fontSize: 15, color: '#2d3748' }}>Nén cực mạnh (Dành cho file nặng)</strong>
+            <strong style={{ display: 'block', fontSize: 15, color: '#2d3748' }}>Nén cực mạnh</strong>
             <span style={{ fontSize: 12, color: '#718096' }}>Giảm dung lượng xuống mức tối đa (thích hợp để up lên các trang web nộp hồ sơ giới hạn dung lượng thấp).</span>
+          </div>
+        </label>
+
+        {/* Option 3: Ultra - New option for maximum compression (~2MB target) */}
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 16,
+            padding: 20,
+            borderRadius: 8,
+            border: `2px solid ${level === 'ultra' ? '#553c9a' : '#e2e8f0'}`,
+            background: level === 'ultra' ? '#faf5ff' : '#fff',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease'
+          }}
+          onClick={() => setLevel('ultra')}
+        >
+          <input type="radio" checked={level === 'ultra'} onChange={() => {}} style={{ cursor: 'pointer' }} />
+          <div style={{ width: 44, height: 44, background: '#faf5ff', color: '#553c9a', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Zap size={22} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <strong style={{ display: 'block', fontSize: 15, color: '#2d3748' }}>Nén siêu tối ưu (Target ~2MB)</strong>
+            <span style={{ fontSize: 12, color: '#718096' }}>Giảm dung lượng tối đa, phù hợp khi cần file dưới 3MB để upload lên website.</span>
           </div>
         </label>
       </div>

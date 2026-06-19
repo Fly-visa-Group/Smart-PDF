@@ -92,24 +92,25 @@ def get_template_blocks(doc_type: DocumentType, full_text: str, api_key: str = N
 
         if is_copy:
             return [
-                {"type": "paragraph", "translated": "SOCIALIST REPUBLIC OF VIETNAM\nIndependence - Freedom - Happiness", "align": "center", "is_heading": False, "is_bold": True},
-                {"type": "paragraph", "translated": f"BIRTH CERTIFICATE\n(THE COPY)\nNo. {no}\nBook No.: {book_no}", "align": "center", "is_heading": True, "is_bold": True},
-                {"type": "paragraph", "translated": f"Full name: {name}   Gender: {gender}\nDate of birth: {dob}\nPlace of birth: {pob}\nEthnic group: {ethnic}    Nationality: {nationality}", "align": "left", "is_heading": False, "is_bold": False},
-                {"type": "paragraph", "translated": f"Father’s full name: {father_name}\nEthnic group: {ethnic}  Nationality: {nationality}  Year of birth: {father_yob}\nPermanent residence: Khu pho 4, Trang Bom, Dong Nai", "align": "left", "is_heading": False, "is_bold": False},
-                {"type": "paragraph", "translated": f"Mother’s full name: {mother_name}\nEthnic group: {ethnic}  Nationality: {nationality}  Year of birth: {mother_yob}\nPermanent residence: Khu pho 4, Trang Bom, Dong Nai", "align": "left", "is_heading": False, "is_bold": False},
-                {"type": "paragraph", "translated": f"Place of registration: People’s Committee of Trang Bom Ward, Trang Bom District, Dong Nai Province\nDate of registration: {reg_date}", "align": "left", "is_heading": False, "is_bold": False},
-                {"type": "paragraph", "translated": f"REGISTRAR\n(Signed)\n\nSIGNER COPY OF BIRTH CERTIFICATE\nVICE CHAIRMAN\n(Signed, wrote full name and sealed)\n{officer}", "align": "right", "is_heading": False, "is_bold": False}
+                {"type": "paragraph", "translated": "SOCIALIST REPUBLIC OF VIETNAM\nIndependence – Freedom – Happiness", "align": "center", "is_heading": False, "is_bold": True, "font_size": 11, "margin_bottom": 2},
+                {"type": "paragraph", "translated": f"BIRTH CERTIFICATE\n(THE COPY)\nNo. {no}\nBook No.: {book_no}", "align": "center", "is_heading": True, "is_bold": True, "font_size": 18, "margin_bottom": 14},
+                {"type": "paragraph", "translated": f"Full name: {name}   Gender: {gender}\nDate of birth: {dob}\nPlace of birth: {pob}\nEthnic group: {ethnic}    Nationality: {nationality}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 8},
+                {"type": "paragraph", "translated": f"Father’s full name: {father_name}\nEthnic group: {ethnic}  Nationality: {nationality}  Year of birth: {father_yob}\nPermanent residence: Khu pho 4, Trang Bom, Dong Nai", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 8},
+                {"type": "paragraph", "translated": f"Mother’s full name: {mother_name}\nEthnic group: {ethnic}  Nationality: {nationality}  Year of birth: {mother_yob}\nPermanent residence: Khu pho 4, Trang Bom, Dong Nai", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 8},
+                {"type": "paragraph", "translated": f"Place of registration: People’s Committee of Trang Bom Ward, Trang Bom District, Dong Nai Province\nDate of registration: {reg_date}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 14},
+                {"type": "paragraph", "translated": f"REGISTRAR\n(Signed)\n\nSIGNER COPY OF BIRTH CERTIFICATE\nVICE CHAIRMAN\n(Signed, wrote full name and sealed)\n{officer}", "align": "right", "is_heading": False, "is_bold": False, "font_size": 11}
             ]
         else:
             return [
-                {"type": "paragraph", "translated": "PEOPLE’S COMMITTEE\nPrecinct/Commune: Loc An\nDistrict: Bao Loc\nProvince: Lam Dong", "align": "left", "is_heading": False, "is_bold": False},
-                {"type": "paragraph", "translated": "SOCIALIST REPUBLIC OF VIETNAM\nIndependence – Freedom - Happiness", "align": "right", "is_heading": False, "is_bold": True},
-                {"type": "paragraph", "translated": f"Form TP/HT 2\nNo.          : {no}\nBook No.: {book_no}", "align": "left", "is_heading": False, "is_bold": False},
-                {"type": "paragraph", "translated": "BIRTH CERTIFICATE", "align": "center", "is_heading": True, "is_bold": True},
-                {"type": "paragraph", "translated": f"Name in Full : {name}   Gender: {gender}\nDate of Birth : {dob}\nPlace of Birth : {pob}\nEthnic Group : {ethnic}   Nationality: {nationality}", "align": "left", "is_heading": False, "is_bold": False},
-                {"type": "paragraph", "translated": "PARENTS’ DETAILS", "align": "left", "is_heading": True, "is_bold": True},
+                {"type": "paragraph", "translated": "PEOPLE’S COMMITTEE\nPrecinct/Commune: Loc An\nDistrict: Bao Loc\nProvince: Lam Dong", "align": "left", "is_heading": False, "is_bold": False, "font_size": 11, "margin_bottom": 2},
+                {"type": "paragraph", "translated": "SOCIALIST REPUBLIC OF VIETNAM\nIndependence – Freedom – Happiness", "align": "right", "is_heading": False, "is_bold": True, "font_size": 11, "margin_bottom": 2},
+                {"type": "paragraph", "translated": f"Form TP/HT 2\nNo.          : {no}\nBook No.: {book_no}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 11, "margin_bottom": 4},
+                {"type": "paragraph", "translated": "BIRTH CERTIFICATE", "align": "center", "is_heading": True, "is_bold": True, "font_size": 18, "margin_bottom": 14},
+                {"type": "paragraph", "translated": f"Name in Full : {name}   Gender: {gender}\nDate of Birth : {dob}\nPlace of Birth : {pob}\nEthnic Group : {ethnic}   Nationality: {nationality}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 8},
+                {"type": "paragraph", "translated": "PARENTS’ DETAILS", "align": "left", "is_heading": True, "is_bold": True, "font_size": 13, "margin_bottom": 4},
                 {
                     "type": "table",
+                    "font_size": 12,
                     "translated_cells": [
                         ["", "Mother", "Father"],
                         ["Name in Full", mother_name, father_name],
@@ -120,8 +121,8 @@ def get_template_blocks(doc_type: DocumentType, full_text: str, api_key: str = N
                         ["Place of Residence", "Loc An - Bao Loc - Lam Dong", "Loc An - Bao Loc - Lam Dong"]
                     ]
                 },
-                {"type": "paragraph", "translated": f"Full name, Age, Identification Card No. of Informant: {father_name}, Loc An – Bao Loc – Lam Dong", "align": "left", "is_heading": False, "is_bold": False},
-                {"type": "paragraph", "translated": f"Informant\n(Signed)\n……………………….\n\nRegistration on {reg_date}\nON BEHALF OF PEOPLE’S COMMITTEE\nVice Chairman\n(Signed and Sealed)\n{officer}", "align": "right", "is_heading": False, "is_bold": False}
+                {"type": "paragraph", "translated": f"Full name, Age, Identification Card No. of Informant: {father_name}, Loc An – Bao Loc – Lam Dong", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 14},
+                {"type": "paragraph", "translated": f"Informant\n(Signed)\n……………………….\n\nRegistration on {reg_date}\nON BEHALF OF PEOPLE’S COMMITTEE\nVice Chairman\n(Signed and Sealed)\n{officer}", "align": "right", "is_heading": False, "is_bold": False, "font_size": 11}
             ]
 
     # ── 2. MARRIAGE CERTIFICATE ───────────────────────────────────────────────
@@ -132,23 +133,23 @@ def get_template_blocks(doc_type: DocumentType, full_text: str, api_key: str = N
         book_no = search_original_value(r'quyen so\s*[:\-]?\s*([a-z0-9]+)', normalized_text, full_text) or "01"
         
         return [
-            {"type": "paragraph", "translated": "SOCIALIST REPUBLIC OF VIETNAM\nIndependence - Freedom - Happiness", "align": "center", "is_heading": False, "is_bold": True},
-            {"type": "paragraph", "translated": f"MARRIAGE CERTIFICATE\nNo.: {no}\nBook No.: {book_no}\n(ORIGINAL)", "align": "center", "is_heading": True, "is_bold": True},
-            {"type": "paragraph", "translated": f"Husband’s full name: {husband}\nDate of birth: October 10th, 1988\nEthnic group: Kinh   Nationality: Vietnamese\nPermanent/temporary residence: Ho Chi Minh City\nID Card No./Passport No.: 0123456789", "align": "left", "is_heading": False, "is_bold": False},
-            {"type": "paragraph", "translated": f"Wife’s full name: {wife}\nDate of birth: September 09th, 1990\nEthnic group: Kinh   Nationality: Vietnamese\nPermanent/temporary residence: Ho Chi Minh City\nID Card No./Passport No.: 9876543210", "align": "left", "is_heading": False, "is_bold": False},
-            {"type": "paragraph", "translated": "Husband\n(Signed)                        Wife\n(Signed)", "align": "center", "is_heading": False, "is_bold": True},
-            {"type": "paragraph", "translated": "Place of registration: UBND District 1, Ho Chi Minh City\nDate of registration: October 20th, 2018", "align": "left", "is_heading": False, "is_bold": False},
-            {"type": "paragraph", "translated": "REGISTRAR\n(Signed)\n\nSIGNER OF MARRIAGE CERTIFICATE\nCHAIRMAN\n(Signed and sealed)", "align": "right", "is_heading": False, "is_bold": False}
+            {"type": "paragraph", "translated": "SOCIALIST REPUBLIC OF VIETNAM\nIndependence – Freedom – Happiness", "align": "center", "is_heading": False, "is_bold": True, "font_size": 11, "margin_bottom": 2},
+            {"type": "paragraph", "translated": f"MARRIAGE CERTIFICATE\n(ORIGINAL)    No.: {no}\nBook No.: {book_no}", "align": "center", "is_heading": True, "is_bold": True, "font_size": 18, "margin_bottom": 14},
+            {"type": "paragraph", "translated": f"Husband’s full name: {husband}\nDate of birth: October 10th, 1988\nEthnic group: Kinh   Nationality: Vietnamese\nPermanent/temporary residence: Ho Chi Minh City\nID Card No./Passport No.: 0123456789", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 8},
+            {"type": "paragraph", "translated": f"Wife’s full name: {wife}\nDate of birth: September 09th, 1990\nEthnic group: Kinh   Nationality: Vietnamese\nPermanent/temporary residence: Ho Chi Minh City\nID Card No./Passport No.: 9876543210", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 8},
+            {"type": "paragraph", "translated": "Husband\n(Signed)                        Wife\n(Signed)", "align": "center", "is_heading": False, "is_bold": True, "font_size": 12, "margin_bottom": 8},
+            {"type": "paragraph", "translated": "Place of registration: UBND District 1, Ho Chi Minh City\nDate of registration: October 20th, 2018", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 14},
+            {"type": "paragraph", "translated": "REGISTRAR\n(Signed)\n\nSIGNER OF MARRIAGE CERTIFICATE\nCHAIRMAN\n(Signed and sealed)", "align": "right", "is_heading": False, "is_bold": False, "font_size": 11}
         ]
 
     # ── 3. HIGH SCHOOL REPORT ─────────────────────────────────────────────────
     elif doc_type == "school_transcript":
         name = strip_accents_simple(search_original_value(r'(?:hoc sinh|ho ten)\s*[:\-]?\s*([a-z\s]+)', normalized_text, full_text) or "NGUYEN VAN A").upper()
         return [
-            {"type": "paragraph", "translated": "MINISTRY OF EDUCATION AND TRAINING\n\nSCHOOL REPORT\nHIGH SCHOOL", "align": "center", "is_heading": True, "is_bold": True},
-            {"type": "paragraph", "translated": f"Full name: {name}\nNo.: 12/THPT", "align": "center", "is_heading": False, "is_bold": False},
-            {"type": "paragraph", "translated": "SOCIALIST REPUBLIC OF VIETNAM\nIndependence – Freedom – Happiness\n\nHIGH SCHOOL REPORT", "align": "center", "is_heading": True, "is_bold": True},
-            {"type": "paragraph", "translated": f"Fullname: {name}   Gender: Male\nDate of birth: July 17th, 1990\nPlace of birth: Loc An - Bao Loc - Lam Dong\nEthnic group: Kinh\nCurrent address: Loc An - Bao Loc - Lam Dong", "align": "left", "is_heading": False, "is_bold": False},
+            {"type": "paragraph", "translated": "MINISTRY OF EDUCATION AND TRAINING\n\nSCHOOL REPORT\nHIGH SCHOOL", "align": "center", "is_heading": True, "is_bold": True, "font_size": 16, "margin_bottom": 8},
+            {"type": "paragraph", "translated": f"Full name: {name}\nNo.: 12/THPT", "align": "center", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 4},
+            {"type": "paragraph", "translated": "SOCIALIST REPUBLIC OF VIETNAM\nIndependence – Freedom – Happiness\n\nHIGH SCHOOL REPORT", "align": "center", "is_heading": True, "is_bold": True, "font_size": 14, "margin_bottom": 8},
+            {"type": "paragraph", "translated": f"Fullname: {name}   Gender: Male\nDate of birth: July 17th, 1990\nPlace of birth: Loc An - Bao Loc - Lam Dong\nEthnic group: Kinh\nCurrent address: Loc An - Bao Loc - Lam Dong", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 8},
             {
                 "type": "table",
                 "translated_cells": [
@@ -168,7 +169,7 @@ def get_template_blocks(doc_type: DocumentType, full_text: str, api_key: str = N
                     ["Average marks", "8.8", "8.9", "8.9", "(Signed)"]
                 ]
             },
-            {"type": "paragraph", "translated": "Head teacher\n(Full name and signature)\n(signed)\n.....................................\n\nPrincipal\n(signed and sealed)", "align": "right", "is_heading": False, "is_bold": False}
+            {"type": "paragraph", "translated": "Head teacher\n(Full name and signature)\n(signed)\n.....................................\n\nPrincipal\n(signed and sealed)", "align": "right", "is_heading": False, "is_bold": False, "font_size": 11}
         ]
 
     # ── 4. CERTIFICATE OF LAND USE RIGHTS ──────────────────────────────────────
@@ -176,11 +177,11 @@ def get_template_blocks(doc_type: DocumentType, full_text: str, api_key: str = N
         mr = strip_accents_simple(search_original_value(r'(?:ong|mr)\s*[:\-]?\s*([a-z\s]+)', normalized_text, full_text) or "NGUYEN VAN A").upper()
         mrs = strip_accents_simple(search_original_value(r'(?:ba|mrs)\s*[:\-]?\s*([a-z\s]+)', normalized_text, full_text) or "NGUYEN THI B").upper()
         return [
-            {"type": "paragraph", "translated": "SOCIALIST REPUBLIC OF VIETNAM\nIndependence - Freedom - Happiness\n_________________", "align": "center", "is_heading": False, "is_bold": True},
-            {"type": "paragraph", "translated": "CERTIFICATE OF\nLAND USE RIGHTS, OWNERSHIP OF HOUSE\nAND OTHER PROPERTIES ASSOCIATED WITH LAND", "align": "center", "is_heading": True, "is_bold": True},
-            {"type": "paragraph", "translated": f"I. Name of land user, owner of house and other properties associated with land:\nMR: {mr}   Year of birth: 1980  ID: 012345678\nPermanent residence: Hanoi\nMRS: {mrs}   Year of birth: 1983  ID: 987654321\nPermanent residence: Hanoi", "align": "left", "is_heading": False, "is_bold": False},
-            {"type": "paragraph", "translated": "II. Land Lot, house and other properties attaching with land\n1. Land lot:\na) Land lot No.: 12   Map sheet No.: 34\nb) Address: Hanoi\nc) Area: 100 m2\nd) Form of use: Private use\nđ) Purpose of use: Residential land\ne) Time of use: Long-term\ng) Origin of use: Allocated by State", "align": "left", "is_heading": False, "is_bold": False},
-            {"type": "paragraph", "translated": "DIRECTOR OF RESOURCES AND ENVIRONMENT DEPARTMENT\n(Signed, full name and sealed)", "align": "right", "is_heading": False, "is_bold": False}
+            {"type": "paragraph", "translated": "SOCIALIST REPUBLIC OF VIETNAM\nIndependence – Freedom – Happiness\n_________________", "align": "center", "is_heading": False, "is_bold": True, "font_size": 11, "margin_bottom": 2},
+            {"type": "paragraph", "translated": "CERTIFICATE OF\nLAND USE RIGHTS, OWNERSHIP OF HOUSE\nAND OTHER PROPERTIES ASSOCIATED WITH LAND", "align": "center", "is_heading": True, "is_bold": True, "font_size": 16, "margin_bottom": 14},
+            {"type": "paragraph", "translated": f"I. Name of land user, owner of house and other properties associated with land:\nMR: {mr}   Year of birth: 1980  ID: 012345678\nPermanent residence: Hanoi\nMRS: {mrs}   Year of birth: 1983  ID: 987654321\nPermanent residence: Hanoi", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 8},
+            {"type": "paragraph", "translated": "II. Land Lot, house and other properties attaching with land\n1. Land lot:\na) Land lot No.: 12   Map sheet No.: 34\nb) Address: Hanoi\nc) Area: 100 m2\nd) Form of use: Private use\nđ) Purpose of use: Residential land\ne) Time of use: Long-term\ng) Origin of use: Allocated by State", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 14},
+            {"type": "paragraph", "translated": "DIRECTOR OF RESOURCES AND ENVIRONMENT DEPARTMENT\n(Signed, full name and sealed)", "align": "right", "is_heading": False, "is_bold": False, "font_size": 11}
         ]
 
     # ── 5. CONFIRMATION OF RESIDENCE INFORMATION (CT07) ────────────────────────
@@ -314,29 +315,32 @@ def get_template_blocks(doc_type: DocumentType, full_text: str, api_key: str = N
             {
                 "type": "table",
                 "borderless": True,
+                "font_size": 10,
+                "col_widths": ["35%", "35%", "30%"],
                 "translated_cells": [
                     [
                         f"{superior}\n{registration}\nNo. {no}/XN",
-                        "SOCIALIST REPUBLIC OF VIETNAM\nIndependence - Freedom - Happiness",
+                        "SOCIALIST REPUBLIC OF VIETNAM\nIndependence – Freedom – Happiness",
                         "Form CT07 promulgating\nwith Circular No. 56/2021/TT-BCA\ndated May 15, 2021"
                     ]
                 ]
             },
-            {"type": "paragraph", "translated": f"{place_str}, on Date: {date_str}", "align": "right", "is_heading": False, "is_bold": False},
-            {"type": "paragraph", "translated": "CONFIRMATION OF RESIDENCE INFORMATION", "align": "center", "is_heading": True, "is_bold": True},
-            {"type": "paragraph", "translated": f"I. At the proposal of Mr./Mrs.: {proposer}", "align": "left", "is_heading": False, "is_bold": True},
-            {"type": "paragraph", "translated": f"1. Full name: {fullname}\n2. Date of birth: {dob}      3. Gender: {gender}\n4. Personal identification number/ID: {id_no}\n5. Ethnic group: {ethnic}      6. Religion: {religion}      7. Nationality: {nationality}\n8. Native place: {native_place}", "align": "left", "is_heading": False, "is_bold": False},
-            {"type": "paragraph", "translated": f"II. {registration} to confirm the residence information of Mr./Mrs. named in Section I, as follows:", "align": "left", "is_heading": False, "is_bold": True},
-            {"type": "paragraph", "translated": f"1. Permanent residence: {perm}\n2. Temporary residence: {temp}\n3. Current residence: {curr}\n4. Full name of householder: {hh_name}\n5. Relationship with householder: {rel}\n6. Personal identification number of the householder: {hh_id}\n7. Information of other household members:", "align": "left", "is_heading": False, "is_bold": False},
+            {"type": "paragraph", "translated": f"{place_str}, on Date: {date_str}", "align": "right", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 4},
+            {"type": "paragraph", "translated": "CONFIRMATION OF RESIDENCE INFORMATION", "align": "center", "is_heading": True, "is_bold": True, "font_size": 16, "margin_bottom": 10},
+            {"type": "paragraph", "translated": f"I. At the proposal of Mr./Mrs.: {proposer}", "align": "left", "is_heading": False, "is_bold": True, "font_size": 12, "margin_bottom": 4},
+            {"type": "paragraph", "translated": f"1. Full name: {fullname}\n2. Date of birth: {dob}      3. Gender: {gender}\n4. Personal identification number/ID: {id_no}\n5. Ethnic group: {ethnic}      6. Religion: {religion}      7. Nationality: {nationality}\n8. Native place: {native_place}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 8},
+            {"type": "paragraph", "translated": f"II. {registration} to confirm the residence information of Mr./Mrs. named in Section I, as follows:", "align": "left", "is_heading": False, "is_bold": True, "font_size": 12, "margin_bottom": 4},
+            {"type": "paragraph", "translated": f"1. Permanent residence: {perm}\n2. Temporary residence: {temp}\n3. Current residence: {curr}\n4. Full name of householder: {hh_name}\n5. Relationship with householder: {rel}\n6. Personal identification number of the householder: {hh_id}\n7. Information of other household members:", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 6},
             {
                 "type": "table",
+                "font_size": 11,
                 "translated_cells": [
                     ["No.", "Full name", "Date of birth", "Gender", "Personal identification number/ID", "Relationship with the householder"],
                     ["1", "", "", "", "", ""]
                 ]
             },
-            {"type": "paragraph", "translated": f"8. Other confirmations: None\nThis confirmation of residence information is valid until: {valid_until}", "align": "left", "is_heading": False, "is_bold": False},
-            {"type": "paragraph", "translated": f"HEAD OF AGENCY\n(Signed, wrote full name, and sealed)\n{signer_title}\n{signer_rank}\n\n{signer_name}", "align": "right", "is_heading": False, "is_bold": True}
+            {"type": "paragraph", "translated": f"8. Other confirmations: None\nThis confirmation of residence information is valid until: {valid_until}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 14},
+            {"type": "paragraph", "translated": f"HEAD OF AGENCY\n(Signed, wrote full name, and sealed)\n{signer_title}\n{signer_rank}\n\n{signer_name}", "align": "right", "is_heading": False, "is_bold": True, "font_size": 11}
         ]
 
     else:
@@ -430,57 +434,67 @@ def get_gemini_birth_cert_blocks(full_text: str, api_key: str) -> list:
             cert_type = "COPY" if is_copy else "ORIGINAL"
             
             blocks = [
-                {"type": "paragraph", "translated": "SOCIALIST REPUBLIC OF VIETNAM\nIndependence - Freedom - Happiness", "align": "center", "is_heading": False, "is_bold": True},
-                {"type": "paragraph", "translated": f"BIRTH CERTIFICATE\n({cert_type})    No. {data.get('no', '')}\nBook No.: {data.get('book_no', '')}", "align": "center", "is_heading": True, "is_bold": True},
-                
+                {"type": "paragraph", "translated": "SOCIALIST REPUBLIC OF VIETNAM\nIndependence – Freedom – Happiness", "align": "center", "is_heading": False, "is_bold": True, "font_size": 11, "margin_bottom": 2},
+                {"type": "paragraph", "translated": f"BIRTH CERTIFICATE\n({cert_type})    No. {data.get('no', '')}\nBook No.: {data.get('book_no', '')}", "align": "center", "is_heading": True, "is_bold": True, "font_size": 18, "margin_bottom": 14},
+
                 {
                     "type": "table",
                     "borderless": True,
+                    "font_size": 12,
+                    "col_widths": ["70%", "30%"],
                     "original_cells": [["Họ, chữ đệm, tên:", "Giới tính:"]],
                     "translated_cells": [[f"Full name: {data.get('full_name', '')}", f"Gender: {data.get('gender', '')}"]]
                 },
-                {"type": "paragraph", "translated": f"Date of birth: {data.get('dob', '')}", "align": "left", "is_heading": False, "is_bold": False},
-                {"type": "paragraph", "translated": f"In words: {data.get('dob_in_words', '')}", "align": "left", "is_heading": False, "is_bold": False},
-                {"type": "paragraph", "translated": f"Place of birth: {data.get('pob', '')}", "align": "left", "is_heading": False, "is_bold": False},
+                {"type": "paragraph", "translated": f"Date of birth: {data.get('dob', '')}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 2},
+                {"type": "paragraph", "translated": f"In words: {data.get('dob_in_words', '')}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 2},
+                {"type": "paragraph", "translated": f"Place of birth: {data.get('pob', '')}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 2},
                 {
                     "type": "table",
                     "borderless": True,
+                    "font_size": 12,
+                    "col_widths": ["50%", "50%"],
                     "original_cells": [["Dân tộc:", "Quốc tịch:"]],
                     "translated_cells": [[f"Ethnic group: {data.get('ethnic', '')}", f"Nationality: {data.get('nationality', '')}"]]
                 },
-                
-                {"type": "paragraph", "translated": "PARENTS' DETAILS", "align": "left", "is_heading": True, "is_bold": True},
-                {"type": "paragraph", "translated": f"Father's full name: {data.get('father_name', '')}", "align": "left", "is_heading": False, "is_bold": False},
+
+                {"type": "paragraph", "translated": "PARENTS' DETAILS", "align": "left", "is_heading": True, "is_bold": True, "font_size": 13, "margin_top": 10, "margin_bottom": 4},
+                {"type": "paragraph", "translated": f"Father's full name: {data.get('father_name', '')}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 2},
                 {
                     "type": "table",
                     "borderless": True,
+                    "font_size": 12,
+                    "col_widths": ["33%", "34%", "33%"],
                     "original_cells": [["Dân tộc:", "Quốc tịch:", "Năm sinh:"]],
                     "translated_cells": [[f"Ethnic group: {data.get('father_ethnic', '')}", f"Nationality: {data.get('father_nationality', '')}", f"Year of birth: {data.get('father_yob', '')}"]]
                 },
-                {"type": "paragraph", "translated": f"Permanent residence: {data.get('father_residence', '')}", "align": "left", "is_heading": False, "is_bold": False},
-                
-                {"type": "paragraph", "translated": f"Mother's full name: {data.get('mother_name', '')}", "align": "left", "is_heading": False, "is_bold": False},
+                {"type": "paragraph", "translated": f"Permanent residence: {data.get('father_residence', '')}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 8},
+
+                {"type": "paragraph", "translated": f"Mother's full name: {data.get('mother_name', '')}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 2},
                 {
                     "type": "table",
                     "borderless": True,
+                    "font_size": 12,
+                    "col_widths": ["33%", "34%", "33%"],
                     "original_cells": [["Dân tộc:", "Quốc tịch:", "Năm sinh:"]],
                     "translated_cells": [[f"Ethnic group: {data.get('mother_ethnic', '')}", f"Nationality: {data.get('mother_nationality', '')}", f"Year of birth: {data.get('mother_yob', '')}"]]
                 },
-                {"type": "paragraph", "translated": f"Permanent residence: {data.get('mother_residence', '')}", "align": "left", "is_heading": False, "is_bold": False},
-                
-                {"type": "paragraph", "translated": f"Place of registration: {data.get('place_of_registration', '')}", "align": "left", "is_heading": False, "is_bold": False},
-                {"type": "paragraph", "translated": f"Date of registration: {data.get('date_of_registration', '')}", "align": "left", "is_heading": False, "is_bold": False},
-                {"type": "paragraph", "translated": f"Note: {data.get('note', '')}", "align": "left", "is_heading": False, "is_bold": False},
-                {"type": "paragraph", "translated": f"Full name of birth declarer: {data.get('declarer', '')}", "align": "left", "is_heading": False, "is_bold": False},
-                {"type": "paragraph", "translated": f"Relation with the declared person: {data.get('relation', '')}", "align": "left", "is_heading": False, "is_bold": False},
-                
+                {"type": "paragraph", "translated": f"Permanent residence: {data.get('mother_residence', '')}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 8},
+
+                {"type": "paragraph", "translated": f"Place of registration: {data.get('place_of_registration', '')}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 2},
+                {"type": "paragraph", "translated": f"Date of registration: {data.get('date_of_registration', '')}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 2},
+                {"type": "paragraph", "translated": f"Note: {data.get('note', '')}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 2},
+                {"type": "paragraph", "translated": f"Full name of birth declarer: {data.get('declarer', '')}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 2},
+                {"type": "paragraph", "translated": f"Relation with the declared person: {data.get('relation', '')}", "align": "left", "is_heading": False, "is_bold": False, "font_size": 12, "margin_bottom": 14},
+
                 {
                     "type": "table",
                     "borderless": True,
+                    "font_size": 11,
+                    "col_widths": ["50%", "50%"],
                     "original_cells": [["NGƯỜI THỰC HIỆN ĐĂNG KÝ MẪU", "NGƯỜI KÝ GIẤY KHAI SINH"]],
                     "translated_cells": [[
-                        f"REGISTRAR\n\n(Signed and wrote full name)\n\n{data.get('registrar', '')}",
-                        f"SIGNER OF BIRTH CERTIFICATE\n{data.get('signer_title', 'CHAIRMAN')}\n(Signed, wrote full name and sealed)\n\n{data.get('signer', '')}"
+                        f"REGISTRAR\n(Signed and wrote full name)\n\n\n{data.get('registrar', '')}",
+                        f"SIGNER OF BIRTH CERTIFICATE\n{data.get('signer_title', 'CHAIRMAN')}\n(Signed, wrote full name and sealed)\n\n\n{data.get('signer', '')}"
                     ]]
                 }
             ]

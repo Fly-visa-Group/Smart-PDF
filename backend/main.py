@@ -10,7 +10,9 @@ from services.pdf_translator import translate_text
 from services.pdf_reader import read_pdf_metadata
 from services.pdf_page_merger import merge_pages_by_manifest
 from services.pdf_to_word import convert_pdf_bytes_to_docx_bytes, parse_pdf_to_blocks, build_docx_from_blocks
-from services.translation import extract_structured, translate_document, build_docx_from_translation, detect_document_type, translate_with_templates
+from services.translation import extract_structured, translate_document, build_docx_from_translation
+from services.translation.html_extractor import pdf_to_html_pages
+from services.translation.html_translator import translate_scanned_to_html
 
 # Upload limits: unlimited (no cap applied)
 
@@ -88,7 +90,7 @@ async def api_compress(
             media_type="application/pdf",
             headers={"Content-Disposition": make_safe_filename_header(f"compressed_{file.filename}")}
         )
-    except Exception as e:
+    except Exception:
         import traceback
         tb = traceback.format_exc()
         raise HTTPException(status_code=500, detail=tb)
@@ -137,6 +139,58 @@ async def api_translate_pdf(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/translate-pdf/html")
+async def api_translate_pdf_html(
+    file: UploadFile = File(...),
+):
+    """
+    HTML-based translation pipeline:
+    - Text PDFs: PDF → structured HTML → Gemini translates preserving all tags/styles
+    - Scanned/image PDFs: OCR text → Gemini reconstructs + translates → clean HTML
+    """
+    try:
+        content = await file.read()
+        pages = pdf_to_html_pages(content)
+
+        # For scanned pages we need structured OCR text — extract once
+        has_scanned = any(p.get("is_scanned") for p in pages)
+        structured_by_page: dict = {}
+        if has_scanned:
+            structured = extract_structured(content)
+            for ps in structured.get("pages", []):
+                raw_text = "\n".join(
+                    b.get("text", "") for b in ps.get("blocks", [])
+                    if b.get("type") != "table" and b.get("text", "").strip()
+                )
+                structured_by_page[ps["page_num"]] = raw_text
+
+        import re as _re
+        from concurrent.futures import ThreadPoolExecutor
+        from services.translation.html_translator import translate_html_page
+
+        def _translate_one(page):
+            if page.get("is_scanned"):
+                raw_text = structured_by_page.get(page["page_num"], "")
+                if not raw_text.strip():
+                    raw_text = _re.sub(r"<[^>]+>", " ", page["html"]).strip()
+                translated_html = translate_scanned_to_html(raw_text)
+            else:
+                translated_html = translate_html_page(page["html"], is_scanned=False)
+            return {**page, "translated_html": translated_html}
+
+        # Translate all pages in parallel (up to 4 at once)
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            translated_pages = list(ex.map(_translate_one, pages))
+
+        return {
+            "original_filename": file.filename or "document.pdf",
+            "total_pages": len(translated_pages),
+            "pages": translated_pages,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/translate-pdf/download-docx")
 async def api_translate_pdf_docx(
     file: UploadFile = File(...),
@@ -171,6 +225,54 @@ async def api_translate_pdf_docx(
         raise HTTPException(status_code=500, detail=str(e))
 class DownloadEditedRequest(BaseModel):
     result: dict
+
+
+@app.post("/api/translate-pdf/download-pdf")
+async def api_translate_pdf_download_pdf(request: DownloadEditedRequest):
+    """Convert translated HTML pages to a formatted PDF using WeasyPrint."""
+    try:
+        import weasyprint
+
+        result = request.result
+        pages = result.get("pages", [])
+
+        # Build full HTML document from all pages
+        page_htmls = []
+        for page in pages:
+            html = page.get("translated_html", "")
+            page_htmls.append(
+                f'<div class="doc-page">{html}</div>'
+            )
+
+        full_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+  @page {{ margin: 2cm 2.2cm; size: A4; }}
+  body {{ font-family: "Times New Roman", Times, serif; font-size: 11pt; color: #1a202c; }}
+  .doc-page {{ page-break-after: always; }}
+  .doc-page:last-child {{ page-break-after: avoid; }}
+  table {{ width: 100%; border-collapse: collapse; }}
+  td {{ vertical-align: top; }}
+  p {{ margin: 2px 0; line-height: 1.4; }}
+</style>
+</head>
+<body>{"".join(page_htmls)}</body>
+</html>"""
+
+        pdf_bytes = weasyprint.HTML(string=full_html).write_pdf()
+
+        base_name = (result.get("original_filename") or "document").rsplit(".", 1)[0]
+        out_filename = f"{base_name}_translated.pdf"
+
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={"Content-Disposition": make_safe_filename_header(out_filename)},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/translate-pdf/download-edited-docx")
@@ -237,6 +339,115 @@ async def api_pdf_to_word_download_edited(request: DownloadEditedWordRequest):
             io.BytesIO(docx_bytes),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={"Content-Disposition": make_safe_filename_header(out_filename)}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── PDF → Images ──────────────────────────────────────────────────────────────
+@app.post("/api/pdf-to-images")
+async def api_pdf_to_images(
+    file: UploadFile = File(...),
+    dpi: int = Form(150),
+    fmt: str = Form("png"),   # "png" or "jpg"
+):
+    try:
+        content = await file.read()
+        doc = __import__("fitz").open(stream=content, filetype="pdf")
+        zoom = dpi / 72
+        mat = __import__("fitz").Matrix(zoom, zoom)
+        images = []
+        for i, page in enumerate(doc):
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            img_bytes = pix.tobytes("png" if fmt == "png" else "jpeg")
+            import base64
+            images.append({
+                "page": i + 1,
+                "data": base64.b64encode(img_bytes).decode(),
+                "mime": "image/png" if fmt == "png" else "image/jpeg",
+                "ext": fmt,
+            })
+        doc.close()
+        return {"total": len(images), "images": images}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Images / PDF → PDF ────────────────────────────────────────────────────────
+@app.post("/api/images-to-pdf")
+async def api_images_to_pdf(files: list[UploadFile] = File(...)):
+    try:
+        import fitz
+        doc = fitz.open()
+        for f in files:
+            data = await f.read()
+            img_doc = fitz.open(stream=data, filetype="image")
+            rect = img_doc[0].rect
+            page = doc.new_page(width=rect.width, height=rect.height)
+            page.show_pdf_page(rect, img_doc, 0)
+            img_doc.close()
+        pdf_bytes = doc.tobytes()
+        doc.close()
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=converted.pdf"},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Word → PDF ────────────────────────────────────────────────────────────────
+@app.post("/api/word-to-pdf")
+async def api_word_to_pdf(file: UploadFile = File(...)):
+    try:
+        import tempfile, os
+        from docx2pdf import convert
+        content = await file.read()
+        suffix = ".docx" if (file.filename or "").endswith(".docx") else ".doc"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_in:
+            tmp_in.write(content)
+            tmp_in_path = tmp_in.name
+        tmp_out_path = tmp_in_path.replace(suffix, ".pdf")
+        try:
+            convert(tmp_in_path, tmp_out_path)
+            with open(tmp_out_path, "rb") as f:
+                pdf_bytes = f.read()
+        finally:
+            os.unlink(tmp_in_path)
+            if os.path.exists(tmp_out_path):
+                os.unlink(tmp_out_path)
+        base = (file.filename or "document").rsplit(".", 1)[0]
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={"Content-Disposition": make_safe_filename_header(f"{base}.pdf")},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Image format conversion (JPG ↔ PNG, etc.) ─────────────────────────────────
+@app.post("/api/convert-image")
+async def api_convert_image(
+    file: UploadFile = File(...),
+    to_format: str = Form("png"),   # "png", "jpg", "webp"
+):
+    try:
+        from PIL import Image as PILImage
+        content = await file.read()
+        img = PILImage.open(io.BytesIO(content)).convert("RGB")
+        out = io.BytesIO()
+        fmt_map = {"png": "PNG", "jpg": "JPEG", "jpeg": "JPEG", "webp": "WEBP"}
+        pil_fmt = fmt_map.get(to_format.lower(), "PNG")
+        img.save(out, format=pil_fmt, quality=95)
+        out.seek(0)
+        mime = "image/png" if pil_fmt == "PNG" else ("image/webp" if pil_fmt == "WEBP" else "image/jpeg")
+        base = (file.filename or "image").rsplit(".", 1)[0]
+        ext = "png" if pil_fmt == "PNG" else ("webp" if pil_fmt == "WEBP" else "jpg")
+        return StreamingResponse(
+            out, media_type=mime,
+            headers={"Content-Disposition": make_safe_filename_header(f"{base}.{ext}")},
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

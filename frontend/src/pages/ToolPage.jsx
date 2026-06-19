@@ -4,6 +4,9 @@ import { UploadCloud, ChevronDown } from 'lucide-react';
 
 import MergeWorkspace from '../components/MergeWorkspace';
 import PdfToWordWorkspace from '../components/PdfToWordWorkspace';
+import PdfToImageWorkspace from '../components/PdfToImageWorkspace';
+import WordToPdfWorkspace from '../components/WordToPdfWorkspace';
+import ImageConvertWorkspace from '../components/ImageConvertWorkspace';
 import TranslateWorkspace from '../components/TranslateWorkspace';
 import CompressWorkspace from '../components/CompressWorkspace';
 
@@ -96,10 +99,18 @@ const config = toolConfig[toolId] || { title: 'Công cụ', formats: ['PDF'] };
         </div>
       ) : toolId === 'merge' ? (
         <MergeWorkspace initialFiles={files} onCancel={() => setFiles([])} />
-      ) : toolId === 'pdf-to-word' ? (
-        <PdfToWordWorkspace initialFiles={files} onCancel={() => setFiles([])} />
       ) : toolId === 'compress' ? (
         <CompressWorkspace initialFiles={files} onCancel={() => setFiles([])} />
+      ) : toolId === 'pdf-to-word' ? (
+        <PdfToWordWorkspace initialFiles={files} onCancel={() => setFiles([])} />
+      ) : toolId === 'word-to-pdf' ? (
+        <WordToPdfWorkspace initialFiles={files} onCancel={() => setFiles([])} />
+      ) : toolId === 'pdf-to-image' ? (
+        <PdfToImageWorkspace initialFiles={files} onCancel={() => setFiles([])} />
+      ) : toolId === 'image-to-pdf' ? (
+        <ImageConvertWorkspace mode="to-pdf" onCancel={() => setFiles([])} />
+      ) : toolId === 'convert-image' ? (
+        <ImageConvertWorkspace mode="convert" onCancel={() => setFiles([])} />
       ) : (
         <div style={{ textAlign: 'center', marginTop: '50px' }}>
           <h3>Đã chọn {files.length} file</h3>

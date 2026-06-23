@@ -1,9 +1,12 @@
 fastapi
+google-genai
 uvicorn
 pypdf
 python-docx
 deep-translator
 python-multipart
 pymupdf
-
 deepl
+rapidocr-onnxruntime
+numpy
+Pillow

@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import io, json, os
+import io, json, os, logging, traceback
 
 from services.pdf_merger import merge_pdfs
 from services.pdf_compressor import compress_pdf
@@ -20,6 +20,20 @@ def make_safe_filename_header(filename: str) -> str:
     return f"attachment; filename*=UTF-8''{quoted}"
 
 app = FastAPI(title="SmartPDF API", description="Backend for SmartPDF")
+logger = logging.getLogger(__name__)
+
+@app.get("/")
+async def root():
+    return {
+        "service": "SmartPDF API",
+        "status": "ok",
+        "health": "/health",
+        "docs": "/docs"
+    }
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,42 +114,39 @@ async def api_translate_pdf_html(
     """
     HTML-based translation pipeline:
     - Text PDFs: PDF → structured HTML → Gemini translates preserving all tags/styles
-    - Scanned/image PDFs: OCR text → Gemini reconstructs + translates → clean HTML
+    - Scanned/image PDFs: render page → PNG → Gemini Vision (reads layout visually, no OCR errors)
+    Paired pages (e.g. tax slip page1+page2) are sent as a combined image to Gemini.
     """
+    import base64
+    import fitz  # PyMuPDF
+    import re as _re
+    from concurrent.futures import ThreadPoolExecutor
+    from services.translation.html_translator import translate_html_page, translate_pdf_page_to_html
+
+    def _extract_pages_as_pdf_b64(pdf_bytes: bytes, *page_nums: int) -> str:
+        """Extract one or more pages from a PDF and return as base64 PDF bytes."""
+        src = fitz.open(stream=pdf_bytes, filetype="pdf")
+        out = fitz.open()
+        for page_num in page_nums:
+            out.insert_pdf(src, from_page=page_num - 1, to_page=page_num - 1)
+        return base64.b64encode(out.tobytes()).decode()
+
     try:
         content = await file.read()
         pages = pdf_to_html_pages(content)
 
-        # For scanned pages we need structured OCR text — extract once
-        has_scanned = any(p.get("is_scanned") for p in pages)
-        structured_by_page: dict = {}
-        if has_scanned:
-            structured = extract_structured(content)
-            for ps in structured.get("pages", []):
-                parts = []
-                for b in ps.get("blocks", []):
-                    if b.get("type") == "table":
-                        # Format table rows as tab-separated so Gemini can reconstruct the table
-                        for row in b.get("rows", []):
-                            cells = [str(c).strip() for c in row if str(c).strip() not in ("", "None", "null")]
-                            if cells:
-                                parts.append(" | ".join(cells))
-                    elif b.get("text", "").strip():
-                        parts.append(b["text"])
-                structured_by_page[ps["page_num"]] = "\n".join(parts)
+        # For pairing: use PyMuPDF text extraction to gauge if page 2 has real content
+        def _page_text_len(page_num: int) -> int:
+            doc = fitz.open(stream=content, filetype="pdf")
+            return len(doc[page_num - 1].get_text().strip())
 
-        import re as _re
-        from concurrent.futures import ThreadPoolExecutor
-        from services.translation.html_translator import translate_html_page
-
-        # Group consecutive scanned pages in pairs so Gemini sees the complete form
-        # (e.g. page 1 = header/fields, page 2 = table → translate together as one block)
+        # Group consecutive scanned pages in pairs when page 2 has real content (>200 chars)
         page_groups: list[dict] = []
         i = 0
         while i < len(pages):
             p = pages[i]
             next_p = pages[i + 1] if i + 1 < len(pages) else None
-            if p.get("is_scanned") and next_p and next_p.get("is_scanned"):
+            if p.get("is_scanned") and next_p and next_p.get("is_scanned") and _page_text_len(next_p["page_num"]) > 200:
                 page_groups.append({"pages": [p, next_p], "paired": True})
                 i += 2
             else:
@@ -145,13 +156,14 @@ async def api_translate_pdf_html(
         def _translate_group(group):
             page_list = group["pages"]
             if group["paired"]:
-                # Combine OCR text from both pages for a complete-form translation
-                raw1 = structured_by_page.get(page_list[0]["page_num"], "") or \
-                       _re.sub(r"<[^>]+>", " ", page_list[0]["html"]).strip()
-                raw2 = structured_by_page.get(page_list[1]["page_num"], "") or \
-                       _re.sub(r"<[^>]+>", " ", page_list[1]["html"]).strip()
-                combined = raw1 + "\n\n--- PAGE 2 (table/details section) ---\n\n" + raw2
-                translated_html = translate_scanned_to_html(combined)
+                # Send both pages as a single 2-page PDF → one Gemini call
+                b64 = _extract_pages_as_pdf_b64(content, page_list[0]["page_num"], page_list[1]["page_num"])
+                translated_html = translate_pdf_page_to_html(b64)
+                if not translated_html:
+                    # fallback: translate individually
+                    h1 = translate_pdf_page_to_html(_extract_pages_as_pdf_b64(content, page_list[0]["page_num"]))
+                    h2 = translate_pdf_page_to_html(_extract_pages_as_pdf_b64(content, page_list[1]["page_num"]))
+                    translated_html = h1 + h2
                 group_pages = [p["page_num"] for p in page_list]
                 lead = {**page_list[0], "translated_html": translated_html,
                         "group_id": page_list[0]["page_num"], "is_group_lead": True,
@@ -163,9 +175,10 @@ async def api_translate_pdf_html(
             else:
                 p = page_list[0]
                 if p.get("is_scanned"):
-                    raw_text = structured_by_page.get(p["page_num"], "") or \
-                               _re.sub(r"<[^>]+>", " ", p["html"]).strip()
-                    translated_html = translate_scanned_to_html(raw_text)
+                    b64 = _extract_pages_as_pdf_b64(content, p["page_num"])
+                    translated_html = translate_pdf_page_to_html(b64)
+                    if not translated_html:
+                        translated_html = "<p style='color:#e53e3e;text-align:center;'>Translation failed for this page.</p>"
                 else:
                     translated_html = translate_html_page(p["html"], is_scanned=False)
                 return [{**p, "translated_html": translated_html,
@@ -183,7 +196,9 @@ async def api_translate_pdf_html(
             "pages": translated_pages,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("/api/translate-pdf/html failed")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"translate_html_failed: {str(e)}")
 
 
 class DownloadEditedRequest(BaseModel):

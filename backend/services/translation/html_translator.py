@@ -8,18 +8,14 @@ Takes the structured HTML output of html_extractor and asks Gemini to:
 
 Falls back to Google Translate per-paragraph if Gemini fails.
 """
-import json
 import re
 import logging
-import urllib.request
-import urllib.error
 import os
 from html.parser import HTMLParser
 
 logger = logging.getLogger(__name__)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyDrLO5Y4untHFecD6iCPoJv5GOzhiEVVZM")
-# Model confirmed working with this API key (v1beta endpoint)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or "AIzaSyBjAY03-8JWPUivjmIn3uwJBOu2HTPB2Cc"
 GEMINI_MODELS = [
     "gemini-3.5-flash",
     "gemini-2.5-flash",
@@ -84,44 +80,39 @@ The document structure (birth certificate, land certificate, etc.) should guide 
 
 
 def _call_gemini(model: str, api_key: str, prompt_text: str, retries: int = 3,
-                  image_b64: str | None = None, mime_type: str = "image/png") -> str:
-    """Call a specific Gemini model and return the text response.
-    If image_b64 is provided, sends a multimodal request (vision)."""
+                  file_b64: str | None = None, mime_type: str = "application/pdf") -> str:
+    """Call Gemini via google-genai SDK. Supports text-only or multimodal (PDF/image)."""
     import time
-    if image_b64:
-        parts = [
-            {"inline_data": {"mime_type": mime_type, "data": image_b64}},
-            {"text": prompt_text},
+    import base64
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=api_key)
+    if file_b64:
+        contents = [
+            types.Part.from_bytes(data=base64.b64decode(file_b64), mime_type=mime_type),
+            types.Part.from_text(text=prompt_text),
         ]
     else:
-        parts = [{"text": prompt_text}]
+        contents = [types.Part.from_text(text=prompt_text)]
 
-    payload = {
-        "contents": [{"parts": parts}],
-        "generationConfig": {"temperature": 0.05, "maxOutputTokens": 16384},
-    }
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent?key={api_key}"
-    )
-    data_bytes = json.dumps(payload).encode("utf-8")
+    config = types.GenerateContentConfig(temperature=0.05, max_output_tokens=16384)
     last_err = None
     for attempt in range(retries):
         try:
-            req = urllib.request.Request(
-                url, data=data_bytes,
-                headers={"Content-Type": "application/json"},
-                method="POST",
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
             )
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-        except urllib.error.HTTPError:
-            raise  # HTTP errors (404, 400) không retry
+            return response.text.strip()
         except Exception as e:
             last_err = e
+            err_str = str(e)
+            if "400" in err_str or "404" in err_str or "INVALID_ARGUMENT" in err_str:
+                raise  # don't retry auth/model errors
             if attempt < retries - 1:
-                time.sleep(2 ** attempt)  # 1s, 2s
+                time.sleep(2 ** attempt)
     raise last_err
 
 
@@ -146,9 +137,6 @@ def _gemini_translate_html(html: str, api_key: str, is_scanned: bool = False) ->
             if text:
                 logger.info(f"Gemini HTML translation succeeded with model: {model}")
                 return text
-        except urllib.error.HTTPError as e:
-            logger.warning(f"Gemini model {model} returned HTTP {e.code}, trying next…")
-            last_err = e
         except Exception as e:
             logger.warning(f"Gemini model {model} failed: {e}, trying next…")
             last_err = e
@@ -195,51 +183,64 @@ def _fallback_translate_html(html: str) -> str:
 # ── Public interface ──────────────────────────────────────────────────────────
 
 VISION_PROMPT = """\
-You are an expert Vietnamese-to-English consular and legal document translator.
-You are looking at an image of a Vietnamese legal document page.
+You are an expert Vietnamese-to-English legal document translator with deep knowledge of Vietnamese government forms.
+
+You are looking at an image of a scanned Vietnamese legal/administrative document. The image may contain 1 or 2 pages stacked vertically.
+
+⚠️ PRIMARY GOAL: Reproduce the EXACT same visual layout as the original document, translated to English.
+- If the original has a 2-column layout → your HTML must have a 2-column layout
+- If the original has a bordered table → your HTML must have a bordered table with the same columns
+- If the original has a 3-part header (left/center/right) → your HTML must have the same 3-part header
+- If the original has fields arranged side-by-side → your HTML must arrange them side-by-side
+- Match the visual structure AS CLOSELY AS POSSIBLE using HTML tables and inline styles
 
 Your task:
-1. Read ALL text visible in the image carefully and completely
-2. Identify the document type (birth certificate, marriage certificate, land certificate, tax payment slip, etc.)
-3. Translate EVERYTHING to formal English — ALL labels, ALL values, ALL headers, ALL text must be in English
-4. Format as a SINGLE compact HTML fragment that MUST fit on one A4 page. Rules:
-   - All text uses line-height:1; margin:0; padding:0 — no extra spacing anywhere
-   - Document title: <p style="text-align:center;margin:2px 0 0 0;line-height:0.8;"><span style="font-size:11pt;font-weight:bold;">TITLE</span></p>
-   - Header lines (SOCIALIST REPUBLIC OF VIETNAM, Independence...): <p style="text-align:center;margin:0;line-height:0.8;"><span style="font-size:8pt;font-weight:bold;">text</span></p>
-   - Subtitle (ORIGINAL/COPY): <p style="text-align:center;margin:0;line-height:0.8;"><span style="font-size:8pt;">(text)</span></p>
-   - Field label + value: <p style="margin:0;line-height:0.8;"><span style="font-size:8pt;"><b>Label:</b> value</span></p>
-   - Two fields on same line: <table style="width:100%;border:none;border-collapse:collapse;margin:0;"><tr><td style="font-size:8pt;border:none;width:50%;line-height:0.8;"><b>Label1:</b> val1</td><td style="font-size:8pt;border:none;line-height:0.8;"><b>Label2:</b> val2</td></tr></table>
-   - Signature block: right-aligned, 8pt, line-height:0.8, margin:0
-   - Do NOT bold values. Only bold labels and document title.
-   - Do NOT invent section headers not present in the original document.
-5. Consular terminology:
-   - ONLY personal names (people's names) → UPPERCASE Latin without diacritics: e.g. Nguyễn Thịnh Trọng → NGUYEN THINH TRONG
-   - All other text → normal Title Case or sentence case, NOT uppercase
-   - "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM" → "SOCIALIST REPUBLIC OF VIETNAM" (ALL CAPS, bold)
-   - "Độc lập - Tự do - Hạnh phúc" → "Independence – Freedom – Happiness"
-   - "Giấy khai sinh" → "Birth Certificate", "Bản chính" → "Original", "Bản sao" → "Copy"
-   - "Họ và tên" → "Full name", "Giới tính" → "Gender", "Nam" → "Male", "Nữ" → "Female"
-   - "Ngày, tháng, năm sinh" → "Date of birth", "Nơi sinh" → "Place of birth"
-   - "Dân tộc" → "Ethnic group", "Quốc tịch" → "Nationality"
-   - "Nơi thường trú" → "Permanent residence"
-   - "Họ và tên cha" → "Father's full name", "Họ và tên mẹ" → "Mother's full name"
-   - "Ngày đăng ký" → "Date of registration", "Người đi khai sinh" → "Birth declarer"
-   - "Người thực hiện" → "Registrar", "Chủ tịch" → "Chairman", "Phó chủ tịch" → "Vice Chairman"
-   - "Giấy kết hôn" → "Marriage Certificate", "Học bạ" → "School Report"
-   - "Giấy chứng nhận quyền sử dụng đất" → "Certificate of Land Use Rights"
-   - "Giấy nộp tiền vào ngân sách nhà nước" → "State Budget Payment Slip"
-   - "Người nộp thuế" → "Taxpayer", "Mã số thuế" → "Tax code"
-   - "Thuế giá trị gia tăng" → "Value Added Tax (VAT)"
-   - "Thuế thu nhập cá nhân" → "Personal Income Tax"
-   - "Tổng số tiền" → "Total amount", "Số tiền bằng chữ" → "Amount in words"
-   - "Ông" → "Mr.", "Bà" → "Mrs."
-   - For tables (tax slips, transcripts): use visible borders: <table style="width:100%;border-collapse:collapse;font-size:7pt;">
-6. Do NOT wrap your response in markdown code fences.
-7. Return ONLY the HTML fragment — no explanations, no preamble.
+1. Read ALL text in the image carefully — every field, every value, every label, every number
+2. Translate ALL text from Vietnamese to English (NOTHING left in Vietnamese in output)
+3. Reproduce the document layout exactly using HTML with inline styles
+4. Use font-size:8pt, line-height:1.1 as default. Title/heading: 11-13pt bold centered.
+
+HTML LAYOUT RULES:
+- 3-part document header: <table style="width:100%;border-collapse:collapse;margin:0 0 4px 0;"><tr><td style="border:none;width:33%;font-size:8pt;vertical-align:top;">left text</td><td style="border:none;text-align:center;font-size:8pt;font-weight:bold;vertical-align:top;">SOCIALIST REPUBLIC OF VIETNAM<br><span style="font-weight:normal;font-style:italic;">Independence – Freedom – Happiness</span></td><td style="border:none;width:33%;text-align:right;font-size:8pt;vertical-align:top;">right text</td></tr></table>
+- Document title: <p style="text-align:center;margin:4px 0;font-size:13pt;font-weight:bold;">TITLE</p>
+- Two-column fields (wife/husband, left/right person): <table style="width:100%;border-collapse:collapse;margin:0;"><tr><td style="border:none;width:50%;font-size:8pt;padding:1px 4px 1px 0;vertical-align:top;"><b>Label:</b> value</td><td style="border:none;width:50%;font-size:8pt;padding:1px 0 1px 4px;vertical-align:top;"><b>Label:</b> value</td></tr></table>
+- Single full-width field: <p style="margin:1px 0;font-size:8pt;"><b>Label:</b> value</p>
+- Bordered data table (transcripts, tax slips): <table style="width:100%;border-collapse:collapse;margin:4px 0;font-size:7.5pt;"><tr style="background:#f5f5f5;"><th style="border:1px solid #666;padding:2px 4px;text-align:center;">Col</th>...</tr><tr><td style="border:1px solid #666;padding:2px 4px;">data</td>...</tr></table>
+- 3-column signature block: <table style="width:100%;border-collapse:collapse;margin:4px 0;"><tr><td style="border:none;width:33%;text-align:center;font-size:8pt;"><b>ROLE 1</b><br><i>(Sign and write full name)</i><br><br>NAME</td><td style="border:none;width:33%;text-align:center;font-size:8pt;">...</td><td style="border:none;width:33%;text-align:center;font-size:8pt;">...</td></tr></table>
+
+TRANSLATION RULES:
+- Personal names → UPPERCASE Latin without diacritics: NGUYEN VAN AN
+- "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM" → "SOCIALIST REPUBLIC OF VIETNAM" (bold, ALL CAPS)
+- "Độc lập - Tự do - Hạnh phúc" → "Independence – Freedom – Happiness" (italic)
+- "Giấy khai sinh" → "Birth Certificate"; "Bản chính" → "Original"; "Bản sao" → "Copy"
+- "Giấy đăng ký kết hôn" / "Chứng nhận kết hôn" → "Marriage Certificate"
+- "Họ và tên" → "Full name"; "Giới tính" → "Gender"; "Nam" → "Male"; "Nữ" → "Female"
+- "Ngày tháng năm sinh" → "Date of birth"; "Nơi sinh" → "Place of birth"
+- "Dân tộc" → "Ethnic group"; "Quốc tịch" → "Nationality"
+- "Nơi thường trú" / "Địa chỉ thường trú" → "Permanent address"
+- "Quê quán" → "Native village/place of origin"
+- "Nghề nghiệp" → "Occupation"; "Số CMND/CCCD/Hộ chiếu" → "ID Card/Passport No."
+- "Họ tên cha" → "Father's name"; "Họ tên mẹ" → "Mother's name"
+- "Ngày đăng ký" → "Date of registration"
+- "Người thực hiện" → "Registrar"; "Chủ tịch" → "Chairman"; "Phó Chủ tịch" → "Vice Chairman"
+- "Học bạ" → "School Report"; "Bảng điểm" → "Transcript"
+- "Môn học" → "Subject"; "Trung bình" → "Average"; "Xếp loại" → "Classification"
+- "Giấy chứng nhận quyền sử dụng đất" → "Certificate of Land Use Rights"
+- "Giấy nộp tiền vào ngân sách nhà nước" → "State Budget Payment Slip"
+- "Người nộp thuế" → "Taxpayer"; "Mã số thuế" → "Tax code"
+- "Thuế GTGT" → "VAT"; "Thuế thu nhập cá nhân" → "Personal Income Tax"
+- "Tổng cộng" / "Tổng số tiền" → "Total"; "Số tiền bằng chữ" → "Amount in words"
+- "Người nộp tiền" → "Payer"; "Kế toán trưởng" → "Chief Accountant"
+- "Thủ trưởng đơn vị" → "Head of Unit"; "Kiểm soát viên" → "Controller"
+- "Ông" → "Mr."; "Bà" → "Mrs."
+
+Do NOT wrap output in markdown code fences.
+Return ONLY the HTML fragment — no explanations, no preamble.
 """
 
-RECONSTRUCT_PROMPT = """\
-You are an expert Vietnamese-to-English consular document translator and HTML formatter.
+RECONSTRUCT_PROMPT = None  # Deprecated — use Vision pipeline instead. Kept for import compat.
+_RECONSTRUCT_PROMPT_REMOVED = """\
+REMOVED — You are an expert Vietnamese-to-English consular document translator and HTML formatter.
 
 ⚠️ CRITICAL RULE: Your output HTML must contain ENGLISH TEXT ONLY. Every word must be translated from Vietnamese to English. Do NOT leave any Vietnamese words in your output. This is a TRANSLATION task, not a transcription task.
 
@@ -333,6 +334,30 @@ Your task:
    - "FOR STATE TREASURY TO FILL IN UPON ACCOUNTING:" section: use a compact bordered box, 7pt
    - Signature section: two columns — left = PAYER, right = bank + date + staff names
    - Do NOT omit any section visible in OCR (accounting box, signatures, staff names)
+   MARRIAGE CERTIFICATE (Chứng nhận kết hôn / Giấy đăng ký kết hôn) TEMPLATE:
+   Use this exact layout when the document is a marriage certificate:
+   <table style="width:100%;border-collapse:collapse;font-size:8pt;margin:0;"><tr>
+     <td style="border:none;width:35%;vertical-align:top;line-height:1.2;"><b>Province/City:</b> ___<br><b>District:</b> ___<br><b>Commune/Ward:</b> ___</td>
+     <td style="border:none;text-align:center;vertical-align:top;line-height:1.2;"><b>SOCIALIST REPUBLIC OF VIETNAM</b><br><i>Independence – Freedom – Happiness</i></td>
+     <td style="border:none;width:25%;text-align:right;vertical-align:top;line-height:1.2;"><b>Form TP-HT6</b><br><b>Book No.:</b> ___<br><b>No.:</b> ___</td>
+   </tr></table>
+   <p style="text-align:center;font-size:14pt;font-weight:bold;margin:6px 0 4px 0;">MARRIAGE CERTIFICATE</p>
+   Then use 2-column borderless table for all fields:
+   Wife (left column) | Husband (right column)
+   Fields: Full name | Date of birth | Native village (Quê quán) | Permanent residence | Occupation | Ethnic group | Nationality | ID card / Passport No.
+   Then date/place row, then 3-column signature: Wife's signature | Husband's signature | ON BEHALF OF PEOPLE'S COMMITTEE CHAIRMAN (Signed and sealed)
+   SCHOOL TRANSCRIPT (Học bạ / Bảng điểm) TEMPLATE:
+   Use this layout when the document is a school transcript or report card:
+   Header: SCHOOL TRANSCRIPT or ACADEMIC TRANSCRIPT (centered, bold)
+   Student info fields: Full name, Gender, Date of birth, School year(s), Permanent address
+   Subject table with borders: <table style="width:100%;border-collapse:collapse;font-size:8pt;margin:4px 0;">
+     Header row: SUBJECTS | Grade 10 | Grade 11 | Grade 12 (or Semester 1 | Semester 2 etc.)
+     Rows: Mathematics, Physics, Chemistry, Biology, Computer Science, Vietnamese Literature, History, Geography, English, etc.
+     Average grade row at bottom
+   </table>
+   Evaluation table: Academic Ability | Moral Training rows with same grade columns
+   Grading system explanation if present
+   Signature block at bottom right: Date/place, Certified by Principal/Vice Principal
 
 Do NOT wrap your response in markdown code fences.
 Return ONLY the HTML fragment.
@@ -349,50 +374,31 @@ def _clean_gemini_html(text: str) -> str:
     return text.strip()
 
 
-def translate_scanned_image_to_html(image_b64: str, api_key: str | None = None) -> str:
+def translate_pdf_page_to_html(pdf_b64: str, api_key: str | None = None) -> str:
     """
-    Send a scanned page image directly to Gemini vision for translation.
-    This is the highest-quality path — Gemini reads the image natively,
-    bypassing OCR errors entirely.
+    Send a single-page (or two-page) PDF directly to Gemini as application/pdf.
+    Gemini reads the PDF natively — no OCR, no image rendering needed.
+    Works for both text PDFs and scanned/image PDFs.
     """
     key = api_key or GEMINI_API_KEY
     for model in GEMINI_MODELS:
         try:
-            raw = _call_gemini(model, key, VISION_PROMPT, image_b64=image_b64)
+            raw = _call_gemini(model, key, VISION_PROMPT, file_b64=pdf_b64, mime_type="application/pdf")
             result = _clean_gemini_html(raw)
             if result and len(result) > 30:
-                logger.info(f"Vision translation succeeded with model: {model}")
+                logger.info(f"PDF translation succeeded with model: {model}")
                 return result
-        except urllib.error.HTTPError as e:
-            logger.warning(f"Vision: model {model} HTTP {e.code}, trying next…")
         except Exception as e:
-            logger.warning(f"Vision: model {model} failed: {e}, trying next…")
+            logger.warning(f"PDF translate: model {model} failed: {e}, trying next…")
     return ""
 
 
+# Keep old names as aliases for any code that still imports them
+def translate_scanned_image_to_html(image_b64: str, api_key: str | None = None) -> str:
+    return translate_pdf_page_to_html(image_b64, api_key)
+
 def translate_scanned_to_html(raw_text: str, api_key: str | None = None) -> str:
-    """
-    For scanned/pure-image PDFs where the OCR text is unreliable:
-    send the raw OCR text to Gemini and ask it to reconstruct + translate → clean HTML.
-    """
-    key = api_key or GEMINI_API_KEY
-    if not raw_text.strip():
-        return "<p style='color:#999;text-align:center;'>No text extracted from this page.</p>"
-
-    prompt = RECONSTRUCT_PROMPT.replace("{text}", raw_text[:8000])
-    for model in GEMINI_MODELS:
-        try:
-            text = _call_gemini(model, key, prompt)
-            text = _clean_gemini_html(text)
-            if text and len(text) > 30:
-                logger.info(f"Scanned reconstruction succeeded with model: {model}")
-                return text
-        except urllib.error.HTTPError as e:
-            logger.warning(f"Model {model} HTTP {e.code}, trying next…")
-        except Exception as e:
-            logger.warning(f"Model {model} failed: {e}")
-
-    return _fallback_translate_html(raw_text)
+    return ""
 
 
 def translate_html_page(html: str, api_key: str | None = None, is_scanned: bool = False) -> str:

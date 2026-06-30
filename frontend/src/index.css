@@ -1274,3 +1274,31 @@ a {
   height: auto !important;
 }
 
+/* ── docx-preview styles ─────────────────────────────────────────────────── */
+.docx-preview-wrapper {
+  padding: 48px 72px;
+  font-family: "Times New Roman", Times, serif;
+  font-size: 13pt;
+  line-height: 1.5;
+  color: #1a202c;
+  min-height: 400px;
+}
+.docx-preview-wrapper section.docx {
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  min-height: unset !important;
+  width: 100% !important;
+}
+/* Ngăn page-break tạo margin lớn giữa các trang */
+.docx-preview-wrapper article {
+  margin-bottom: 0 !important;
+}
+/* Đường kẻ ngăn trang */
+.docx-preview-wrapper article + article {
+  border-top: 2px dashed #e2e8f0;
+  padding-top: 32px;
+  margin-top: 32px;
+}
+
+

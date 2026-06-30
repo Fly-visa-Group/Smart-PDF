@@ -71,9 +71,11 @@ const config = toolConfig[toolId] || { title: 'Công cụ', formats: ['PDF'] };
 
   return (
     <div className={files.length > 0 && toolId === 'merge' ? 'merge-workspace-wrapper' : 'tool-workspace'}>
-      {/* Translate tool manages its own full-page UI */}
+      {/* Tools that manage their own full-page UI */}
       {toolId === 'translate' ? (
         <TranslateWorkspace />
+      ) : toolId === 'pdf-to-word' ? (
+        <PdfToWordWorkspace />
       ) : files.length === 0 ? (
         <div
           className={`dropzone ${isDragActive ? 'active' : ''}`}
@@ -104,8 +106,6 @@ const config = toolConfig[toolId] || { title: 'Công cụ', formats: ['PDF'] };
         <SplitWorkspace initialFiles={files} onCancel={() => setFiles([])} />
       ) : toolId === 'compress' ? (
         <CompressWorkspace initialFiles={files} onCancel={() => setFiles([])} />
-      ) : toolId === 'pdf-to-word' ? (
-        <PdfToWordWorkspace initialFiles={files} onCancel={() => setFiles([])} />
       ) : toolId === 'word-to-pdf' ? (
         <WordToPdfWorkspace initialFiles={files} onCancel={() => setFiles([])} />
       ) : toolId === 'pdf-to-image' ? (

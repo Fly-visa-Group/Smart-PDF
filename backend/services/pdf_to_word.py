@@ -1,281 +1,423 @@
+"""
+PDF → Word (DOCX) Converter.
+- Text tiếng Việt dùng get_text("dict") để PyMuPDF tự merge glyph.
+- Bảng biểu dùng word-level spatial lookup để có khoảng trắng đúng.
+- Dòng trong cùng block ghép bằng space (soft-wrap), không dùng \n cứng.
+- Fallback RapidOCR cho trang scan, load model 1 lần duy nhất (global).
+"""
+
 import io
-import re
 import fitz  # PyMuPDF
 from docx import Document
-from docx.shared import Pt, Inches
+from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-def is_inside_any_table(bbox: list, table_bboxes: list) -> bool:
+GLOBAL_OCR_ENGINE = None
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+def _inside_table(bbox, table_bboxes):
     cx = (bbox[0] + bbox[2]) / 2
     cy = (bbox[1] + bbox[3]) / 2
     for tx0, ty0, tx1, ty1 in table_bboxes:
-        if tx0 - 3 <= cx <= tx1 + 3 and ty0 - 3 <= cy <= ty1 + 3:
+        if tx0 - 4 <= cx <= tx1 + 4 and ty0 - 4 <= cy <= ty1 + 4:
             return True
     return False
 
-def convert_pdf_bytes_to_docx_bytes(pdf_bytes: bytes) -> bytes:
+
+def _detect_align(x0, x1, page_width):
+    mid = page_width / 2
+    block_w = x1 - x0
+    sym = abs(x0 - (page_width - x1))
+    if x0 > mid * 1.1 and block_w < page_width * 0.45:
+        return "right"
+    if sym < page_width * 0.06 and block_w < page_width * 0.75:
+        return "center"
+    return "left"
+
+
+def _words_in_rect(page_words, rx0, ry0, rx1, ry1):
+    """Lấy words nằm trong rect, sắp theo y rồi x, ghép bằng space."""
+    found = []
+    for wx0, wy0, wx1, wy1, wtext, *_ in page_words:
+        wcx = (wx0 + wx1) / 2
+        wcy = (wy0 + wy1) / 2
+        if rx0 - 2 <= wcx <= rx1 + 2 and ry0 - 2 <= wcy <= ry1 + 2:
+            found.append((wy0, wx0, wtext))
+    found.sort()
+    return " ".join(w[2] for w in found)
+
+
+def _merge_paragraph_blocks(blocks, page_width):
     """
-    High-fidelity PDF to Word (DOCX) converter:
-    - Automatically detects and reconstructs tables.
-    - Uses OCR (RapidOCR) fallback for scanned image-only PDFs.
-    - Preserves text fonts, alignments (left/center/right), and bold flags.
-    - Formats output using Times New Roman (user standard).
+    Gộp các block liền kề thực chất là cùng một đoạn văn.
+    PDF thường lưu mỗi dòng hiển thị thành một block riêng.
+    Điều kiện gộp: cùng align, gap dọc nhỏ, cùng indent, cỡ chữ tương đương.
     """
-    blocks_data = parse_pdf_to_blocks(pdf_bytes)
-    return build_docx_from_blocks(blocks_data)
+    if not blocks:
+        return blocks
+
+    merged = []
+    current = blocks[0]
+
+    for nxt in blocks[1:]:
+        # Chỉ gộp 2 block đều là paragraph
+        if current["type"] != "paragraph" or nxt["type"] != "paragraph":
+            merged.append(current)
+            current = nxt
+            continue
+
+        cb = current["bbox"]
+        nb = nxt["bbox"]
+
+        gap = nb[1] - cb[3]                        # khoảng cách dọc giữa 2 block
+        line_h = max((cb[3] - cb[1]), 6)           # chiều cao dòng ước lượng
+        cur_size = current.get("font_size", 13) or 13
+        nxt_size = nxt.get("font_size", 13) or 13
+
+        gap_ok       = -2 <= gap < line_h * 1.5    # âm một chút cho phép overlap nhẹ
+        align_ok     = current.get("align") == nxt.get("align")
+        indent_ok    = abs(cb[0] - nb[0]) < page_width * 0.07
+        size_ok      = abs(cur_size - nxt_size) < 2.5
+        # Không gộp nếu block tiếp theo bắt đầu bằng chữ hoa đứng đầu
+        # sau dấu câu kết thúc (dấu chấm, chấm than, chấm hỏi) → đoạn mới
+        cur_lines = current.get("lines", [])
+        last_text = ""
+        if cur_lines and cur_lines[-1].get("runs"):
+            last_text = "".join(r["text"] for r in cur_lines[-1]["runs"]).rstrip()
+        ends_sentence = last_text.endswith((".", "!", "?", ".\n"))
+
+        should_merge = gap_ok and align_ok and indent_ok and size_ok and not ends_sentence
+
+        if should_merge:
+            nxt_lines = nxt.get("lines", [])
+            # Đảm bảo có space giữa cuối block cũ và đầu block mới
+            if cur_lines and cur_lines[-1].get("runs"):
+                last_run = cur_lines[-1]["runs"][-1]
+                if last_run["text"] and not last_run["text"].endswith(" "):
+                    last_run["text"] += " "
+
+            current = {
+                **current,
+                "bbox": [min(cb[0], nb[0]), cb[1], max(cb[2], nb[2]), nb[3]],
+                "lines": cur_lines + nxt_lines,
+                "font_size": max(cur_size, nxt_size),
+                "is_bold": current.get("is_bold", False) or nxt.get("is_bold", False),
+                "is_heading": current.get("is_heading", False) and nxt.get("is_heading", False),
+            }
+        else:
+            merged.append(current)
+            current = nxt
+
+    merged.append(current)
+    return merged
+
+
+# ── core extraction ───────────────────────────────────────────────────────────
 
 def parse_pdf_to_blocks(pdf_bytes: bytes) -> dict:
-    """
-    Parses PDF bytes and extracts text paragraphs and tables as structured blocks per page.
-    """
+    global GLOBAL_OCR_ENGINE
     pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     pages_data = []
-
-    ocr_engine = None
 
     for page_index in range(len(pdf_doc)):
         page = pdf_doc.load_page(page_index)
         page_width = page.rect.width
-        
-        # 1. Table Detection
+
+        # 1. Table detection — dùng word-level lookup để tránh chữ dính
+        page_words = page.get_text("words")  # (x0,y0,x1,y1,text,blk,ln,wn)
         tables = page.find_tables()
         table_bboxes = [list(t.bbox) for t in tables]
         extracted_tables = []
+
         for t in tables:
+            row_count = t.row_count
+            col_count = t.col_count
+            # table.cells là list Rect|None, len = row_count * col_count
+            cells_better = []
+            for r in range(row_count):
+                row = []
+                for c in range(col_count):
+                    cell_rect = t.cells[r * col_count + c]
+                    if cell_rect is not None:
+                        # Dùng word lookup để có khoảng trắng đúng
+                        txt = _words_in_rect(page_words,
+                                             cell_rect[0], cell_rect[1],
+                                             cell_rect[2], cell_rect[3])
+                    else:
+                        # Merged cell hoặc None → fallback extract
+                        raw = t.extract()
+                        txt = str(raw[r][c] or "") if raw and r < len(raw) and c < len(raw[r]) else ""
+                    row.append(txt)
+                cells_better.append(row)
+
             extracted_tables.append({
                 "type": "table",
                 "bbox": list(t.bbox),
-                "cells": t.extract()
+                "cells": cells_better,
             })
 
-        # 2. Text Extraction
+        # 2. Smart OCR trigger
         raw_text = page.get_text("text").strip()
-        needs_ocr = len(raw_text) < 30
+        has_visuals = len(page.get_images()) > 0 or len(page.get_drawings()) > 0
+        needs_ocr = len(raw_text) < 30 and has_visuals
+
         paragraphs = []
 
         if needs_ocr:
-            if ocr_engine is None:
+            if GLOBAL_OCR_ENGINE is None:
                 from rapidocr_onnxruntime import RapidOCR
-                ocr_engine = RapidOCR()
-            
-            # Render page at 2x zoom for crisp OCR
+                GLOBAL_OCR_ENGINE = RapidOCR()
+
             zoom = 2.0
-            mat = fitz.Matrix(zoom, zoom)
-            pix = page.get_pixmap(matrix=mat, alpha=False)
-            img_bytes = pix.tobytes("png")
-            
-            ocr_result, _ = ocr_engine(img_bytes)
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+            ocr_result, _ = GLOBAL_OCR_ENGINE(pix.tobytes("png"))
             if ocr_result:
-                for box, text, conf in ocr_result:
+                for box, text, _ in ocr_result:
                     t_str = text.strip()
                     if not t_str:
                         continue
-                    xs = [pt[0] for pt in box]
-                    ys = [pt[1] for pt in box]
-                    x0 = min(xs) / zoom
-                    y0 = min(ys) / zoom
-                    x1 = max(xs) / zoom
-                    y1 = max(ys) / zoom
-                    
-                    if is_inside_any_table([x0, y0, x1, y1], table_bboxes):
+                    xs = [p[0] for p in box]
+                    ys = [p[1] for p in box]
+                    x0, y0 = min(xs) / zoom, min(ys) / zoom
+                    x1, y1 = max(xs) / zoom, max(ys) / zoom
+                    if _inside_table([x0, y0, x1, y1], table_bboxes):
                         continue
-
-                    # Heuristics
-                    h_val = y1 - y0
-                    font_size_pt = round(h_val * 0.75, 2)
-                    is_bold = font_size_pt > 14
-                    is_heading = font_size_pt >= 14
-
-                    block_width = x1 - x0
-                    page_mid = page_width / 2
-
-                    align = "left"
-                    margin_left = x0
-                    margin_right = page_width - x1
-                    if is_heading and abs(margin_left - margin_right) < (page_width * 0.1) and block_width < (page_width * 0.8):
-                        align = "center"
-                    elif x0 > page_mid * 1.05 and block_width < (page_width * 0.5):
-                        align = "right"
-                    elif abs(margin_left - margin_right) < (page_width * 0.05) and block_width < (page_width * 0.6):
-                        align = "center"
-
+                    h = y1 - y0
+                    size = round(h * 0.75, 1)
                     paragraphs.append({
                         "type": "paragraph",
-                        "text": t_str,
                         "bbox": [x0, y0, x1, y1],
-                        "align": align,
-                        "is_bold": is_bold,
-                        "is_heading": is_heading,
-                        "font_size": font_size_pt
+                        "align": _detect_align(x0, x1, page_width),
+                        "is_bold": size > 14,
+                        "is_heading": size > 14,
+                        "font_size": size,
+                        "lines": [{"runs": [{"text": t_str, "bold": size > 14,
+                                             "italic": False, "size": size,
+                                             "color": None}]}],
                     })
+            paragraphs = _merge_paragraph_blocks(paragraphs, page_width)
+
         else:
-            # Native text extraction
-            raw = page.get_text("dict")
+            raw = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+
+            # Tính heading threshold
             all_sizes = []
-            for block in raw["blocks"]:
-                if "lines" not in block:
-                    continue
-                for line in block["lines"]:
-                    for span in line["spans"]:
-                        if span["text"].strip():
-                            all_sizes.append(span["size"])
-
+            for blk in raw["blocks"]:
+                if blk["type"] == 0:
+                    for ln in blk.get("lines", []):
+                        for sp in ln["spans"]:
+                            if sp["text"].strip():
+                                all_sizes.append(sp["size"])
             avg_size = sum(all_sizes) / len(all_sizes) if all_sizes else 11.0
-            heading_threshold = avg_size * 1.15
+            heading_thresh = avg_size * 1.18
 
-            for block in raw["blocks"]:
-                if "lines" not in block:
-                    continue
-                bbox = list(block["bbox"])
-                if is_inside_any_table(bbox, table_bboxes):
+            for blk in raw["blocks"]:
+                bbox = list(blk["bbox"])
+                if _inside_table(bbox, table_bboxes):
                     continue
 
-                lines_text = []
-                max_font_size = 0.0
-                block_is_bold = False
+                if blk["type"] == 1:  # Image block
+                    paragraphs.append({
+                        "type": "image",
+                        "bbox": bbox,
+                        "ext": blk.get("ext", "png"),
+                        "image": blk["image"],
+                        "align": _detect_align(bbox[0], bbox[2], page_width),
+                    })
+                    continue
 
-                for line in block["lines"]:
-                    line_parts = []
-                    for span in line["spans"]:
-                        t = span["text"]
+                if blk["type"] != 0:
+                    continue
+
+                # Text block
+                line_list = []
+                max_size = 0.0
+                blk_bold = False
+
+                for ln in blk["lines"]:
+                    line_runs = []
+                    for sp in ln["spans"]:
+                        t = sp["text"]
                         if not t:
                             continue
-                        line_parts.append(t)
-                        if span["size"] > max_font_size:
-                            max_font_size = span["size"]
-                        if span["flags"] & 16:
-                            block_is_bold = True
-                    if line_parts:
-                        lines_text.append(" ".join(line_parts))
+                        sz = sp["size"]
+                        bold = bool(sp["flags"] & 16)
+                        italic = bool(sp["flags"] & 2)
+                        # Extract color — PyMuPDF stores as 0xRRGGBB int
+                        raw_color = sp.get("color", 0)
+                        color_hex = None if raw_color == 0 else f"#{raw_color:06X}"
+                        if sz > max_size:
+                            max_size = sz
+                        if bold:
+                            blk_bold = True
+                        line_runs.append({
+                            "text": t,
+                            "bold": bold,
+                            "italic": italic,
+                            "size": round(sz, 1),
+                            "color": color_hex,
+                        })
 
-                block_text = "\n".join(lines_text).strip()
-                if not block_text:
+                    if line_runs:
+                        line_list.append({"runs": line_runs})
+
+                if not line_list:
                     continue
 
-                is_heading = (max_font_size >= heading_threshold) or block_is_bold
-
                 x0, y0, x1, y1 = bbox
-                block_width = x1 - x0
-                page_mid = page_width / 2
-
-                align = "left"
-                margin_left = x0
-                margin_right = page_width - x1
-                if is_heading and abs(margin_left - margin_right) < (page_width * 0.15) and block_width < (page_width * 0.8):
-                    align = "center"
-                elif x0 > page_mid * 1.05 and block_width < (page_width * 0.5):
-                    align = "right"
-                elif abs(margin_left - margin_right) < (page_width * 0.05) and block_width < (page_width * 0.6):
-                    align = "center"
+                is_heading = (max_size >= heading_thresh) or blk_bold
 
                 paragraphs.append({
                     "type": "paragraph",
-                    "text": block_text,
                     "bbox": bbox,
-                    "align": align,
-                    "is_bold": block_is_bold,
+                    "align": _detect_align(x0, x1, page_width),
+                    "is_bold": blk_bold,
                     "is_heading": is_heading,
-                    "font_size": max_font_size
+                    "font_size": round(max_size, 1),
+                    "lines": line_list,
                 })
 
-        # Merge and sort page content (paragraphs and tables) visually top-to-bottom
+        # Gộp các block text liền kề thuộc cùng đoạn văn
+        paragraphs = _merge_paragraph_blocks(paragraphs, page_width)
+
         all_blocks = paragraphs + extracted_tables
         all_blocks.sort(key=lambda b: b["bbox"][1])
-        pages_data.append({
-            "page_num": page_index + 1,
-            "blocks": all_blocks
-        })
+        pages_data.append({"page_num": page_index + 1, "blocks": all_blocks})
 
     pdf_doc.close()
-    return {
-        "pages": pages_data
-    }
+    return {"pages": pages_data}
+
+
+# ── DOCX builder ──────────────────────────────────────────────────────────────
 
 def build_docx_from_blocks(blocks_data: dict) -> bytes:
-    """
-    Builds a beautifully formatted DOCX from structured blocks data.
-    """
-    word_doc = Document()
+    doc = Document()
 
-    # Margins setup
-    for section in word_doc.sections:
-        section.top_margin = Inches(1)
-        section.bottom_margin = Inches(1)
-        section.left_margin = Inches(1)
-        section.right_margin = Inches(1)
+    for section in doc.sections:
+        section.top_margin    = Inches(1.0)
+        section.bottom_margin = Inches(1.0)
+        section.left_margin   = Inches(1.18)
+        section.right_margin  = Inches(1.18)
 
-    # Configure Normal style
-    style = word_doc.styles['Normal']
-    font = style.font
-    font.name = 'Times New Roman'
-    font.size = Pt(13) # Enforce Times New Roman 13pt body, 14pt bold headings
+    normal = doc.styles["Normal"]
+    normal.font.name = "Times New Roman"
+    normal.font.size = Pt(13)
+    normal.paragraph_format.space_after  = Pt(4)
+    normal.paragraph_format.space_before = Pt(0)
+    normal.paragraph_format.line_spacing = 1.15
 
-    p_format = style.paragraph_format
-    p_format.line_spacing = 1.25
-    p_format.space_after = Pt(4)
-    p_format.space_before = Pt(0)
+    def _add_para(block):
+        align_str  = block.get("align", "left")
+        dom_size   = block.get("font_size", 13.0) or 13.0
+        lines      = block.get("lines", [])
+        is_heading = block.get("is_heading", False)
+        blk_bold   = block.get("is_bold", False)
+        bbox       = block.get("bbox", [0, 0, 0, 0])
+
+        p = doc.add_paragraph()
+        if align_str == "center":
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        elif align_str == "right":
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        else:
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            x0 = bbox[0]
+            if x0 > 95:
+                p.paragraph_format.left_indent = Inches(
+                    min(2.5, max(0.0, (x0 - 72) / 72.0))
+                )
+
+        # Gộp các dòng trong cùng block bằng SPACE, không dùng \n cứng.
+        # PDF soft-wrap theo cột → Word tự reflow theo lề trang.
+        all_runs = []
+        for l_idx, ln in enumerate(lines):
+            for r_idx, rdata in enumerate(ln.get("runs", [])):
+                txt = rdata.get("text", "")
+                if not txt:
+                    continue
+
+                # Đảm bảo có space giữa các dòng (không phải giữa các span cùng dòng)
+                if r_idx == 0 and l_idx > 0:
+                    # Đây là run đầu của dòng mới — thêm space nối với dòng trước
+                    if all_runs and not all_runs[-1]["text"].endswith(" "):
+                        # Thêm space vào run trước hoặc tạo run space mới
+                        all_runs[-1]["text"] += " "
+
+                all_runs.append({
+                    "text": txt,
+                    "bold": rdata.get("bold", False) or (is_heading and blk_bold),
+                    "italic": rdata.get("italic", False),
+                    "size": rdata.get("size") or dom_size,
+                })
+
+        for rdata in all_runs:
+            txt = rdata["text"]
+            if not txt:
+                continue
+            run = p.add_run(txt)
+            run.font.name = "Times New Roman"
+            run.font.size = Pt(round(rdata["size"], 1))
+            run.bold   = rdata["bold"]
+            run.italic = rdata["italic"]
+            color_hex = rdata.get("color")
+            if color_hex:
+                r = int(color_hex[1:3], 16)
+                g = int(color_hex[3:5], 16)
+                b = int(color_hex[5:7], 16)
+                run.font.color.rgb = RGBColor(r, g, b)
 
     for p_idx, page in enumerate(blocks_data.get("pages", [])):
-        if p_idx > 0:
-            word_doc.add_page_break()
-
         for block in page.get("blocks", []):
             if block["type"] == "table":
                 cells = block.get("cells", [])
                 if not cells:
                     continue
-                rows_count = len(cells)
-                cols_count = len(cells[0]) if rows_count > 0 else 0
-                if cols_count == 0:
+                n_rows = len(cells)
+                n_cols = max((len(r) for r in cells), default=0)
+                if n_cols == 0:
                     continue
-                
-                table = word_doc.add_table(rows=rows_count, cols=cols_count)
-                table.style = 'Table Grid'
-                for r_idx, row_data in enumerate(cells):
-                    for c_idx, cell_value in enumerate(row_data):
-                        cell_text = cell_value or ""
-                        cell = table.cell(r_idx, c_idx)
-                        cell.text = str(cell_text)
-                        
-                        # Apply font styles
-                        for p in cell.paragraphs:
-                            for r in p.runs:
-                                r.font.name = 'Times New Roman'
-                                r.font.size = Pt(13)
+
+                tbl = doc.add_table(rows=n_rows, cols=n_cols)
+                tbl.style = "Table Grid"
+                for r_i, row in enumerate(cells):
+                    for c_i in range(n_cols):
+                        val = str(row[c_i] or "") if c_i < len(row) else ""
+                        cell = tbl.cell(r_i, c_i)
+                        cell.text = val
+                        for cp in cell.paragraphs:
+                            for cr in cp.runs:
+                                cr.font.name = "Times New Roman"
+                                cr.font.size = Pt(11)
+
+            elif block["type"] == "image":
+                img_bytes = block.get("image")
+                if not img_bytes:
+                    continue
+                p = doc.add_paragraph()
+                align_str = block.get("align", "center")
+                p.alignment = (WD_ALIGN_PARAGRAPH.CENTER if align_str == "center"
+                               else WD_ALIGN_PARAGRAPH.RIGHT if align_str == "right"
+                               else WD_ALIGN_PARAGRAPH.LEFT)
+                pdf_width = block["bbox"][2] - block["bbox"][0]
+                docx_width = Inches(min(5.8, max(0.6, pdf_width / 72.0)))
+                run = p.add_run()
+                try:
+                    run.add_picture(io.BytesIO(img_bytes), width=docx_width)
+                except Exception:
+                    run.text = f"[Hình ảnh: lỗi định dạng .{block.get('ext', 'img')}]"
+
             else:
-                p = word_doc.add_paragraph()
-                align_str = block.get("align", "left")
-                if align_str == "center":
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                elif align_str == "right":
-                    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                else:
-                    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                    # Preserve indentations based on x0 (PDF coordinate points)
-                    bbox = block.get("bbox")
-                    if bbox and len(bbox) >= 4:
-                        x0 = bbox[0]
-                        # PDF points are 72 per inch. Default page left margin is 1.0 inch (72 points).
-                        # Apply relative indent if it's indented further to the right.
-                        if x0 > 90:
-                            indent_inches = (x0 - 72) / 72.0
-                            p.paragraph_format.left_indent = Inches(min(3.5, max(0.0, indent_inches)))
+                _add_para(block)
 
-                lines = block.get("text", "").split("\n")
-                for l_idx, line in enumerate(lines):
-                    if l_idx > 0:
-                        p.add_run("\n")
-                    run = p.add_run(line)
-                    run.font.name = 'Times New Roman'
-                    if block.get("is_heading"):
-                        run.font.size = Pt(14)
-                        run.bold = True
-                    else:
-                        run.font.size = Pt(13)
-                        if block.get("is_bold"):
-                            run.bold = True
+    out = io.BytesIO()
+    doc.save(out)
+    out.seek(0)
+    return out.read()
 
-    output = io.BytesIO()
-    word_doc.save(output)
-    output.seek(0)
-    return output.read()
+
+# ── convenience ───────────────────────────────────────────────────────────────
+
+def convert_pdf_bytes_to_docx_bytes(pdf_bytes: bytes) -> bytes:
+    return build_docx_from_blocks(parse_pdf_to_blocks(pdf_bytes))

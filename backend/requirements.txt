@@ -13,3 +13,5 @@ deepl
 rapidocr-onnxruntime
 numpy
 Pillow
+mammoth
+weasyprint

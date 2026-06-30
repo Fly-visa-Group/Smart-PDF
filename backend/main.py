@@ -43,14 +43,21 @@ app.add_middleware(
 )
 
 @app.post("/api/merge")
-async def api_merge(files: list[UploadFile] = File(...)):
+async def api_merge(
+    files: list[UploadFile] = File(...),
+    rotations: str = Form(default="[]"),   # JSON array of ints, one per file
+    output_name: str = Form(default=""),
+):
     try:
         file_contents = [await f.read() for f in files]
-        merged_pdf = merge_pdfs(file_contents)
+        rot_list = json.loads(rotations) if rotations else []
+        merged_pdf = merge_pdfs(file_contents, rot_list if rot_list else None)
+        base = output_name.strip() or (files[0].filename or "merged").rsplit(".", 1)[0]
+        out_name = f"{base}_merged.pdf"
         return StreamingResponse(
             io.BytesIO(merged_pdf),
             media_type="application/pdf",
-            headers={"Content-Disposition": "attachment; filename=merged.pdf"}
+            headers={"Content-Disposition": make_safe_filename_header(out_name)}
         )
     except HTTPException:
         raise
@@ -61,18 +68,21 @@ async def api_merge(files: list[UploadFile] = File(...)):
 async def api_merge_pages(
     files: list[UploadFile] = File(...),
     manifest: str = Form(...),
+    output_name: str = Form(default=""),
 ):
     """Merge specific pages in a custom order.
-    manifest JSON: [{ "file_index": 0, "page": 1 }, ...]
+    manifest JSON: [{ "file_index": 0, "page": 1, "rotation": 0 }, ...]
     """
     try:
         manifest_data = json.loads(manifest)
         file_contents = [await f.read() for f in files]
         merged_pdf = merge_pages_by_manifest(file_contents, manifest_data)
+        base = output_name.strip() or (files[0].filename or "merged").rsplit(".", 1)[0]
+        out_name = f"{base}_merged.pdf"
         return StreamingResponse(
             io.BytesIO(merged_pdf),
             media_type="application/pdf",
-            headers={"Content-Disposition": "attachment; filename=merged.pdf"}
+            headers={"Content-Disposition": make_safe_filename_header(out_name)}
         )
     except HTTPException:
         raise
@@ -200,50 +210,79 @@ class DownloadEditedRequest(BaseModel):
 
 @app.post("/api/translate-pdf/download-pdf")
 async def api_translate_pdf_download_pdf(request: DownloadEditedRequest):
-    """Convert translated HTML pages to PDF using xhtml2pdf."""
+    """Convert translated HTML pages to PDF using WeasyPrint (A4, proper fonts)."""
     try:
-        from xhtml2pdf import pisa
+        from weasyprint import HTML as WeasyHTML, CSS
+        import tempfile, os
 
         result = request.result
         pages = result.get("pages", [])
 
-        import re as _re
-        def _strip_margins(html: str) -> str:
-            """Remove margin/padding from inline styles so xhtml2pdf doesn't add extra space."""
-            html = _re.sub(r'margin\s*:\s*[\d.]+[a-z%]*(\s+[\d.]+[a-z%]*){0,3}\s*;?', 'margin:0;', html)
-            html = _re.sub(r'padding\s*:\s*[\d.]+[a-z%]*(\s+[\d.]+[a-z%]*){0,3}\s*;?', 'padding:1px 2px;', html)
-            html = _re.sub(r'line-height\s*:\s*[\d.]+\s*;?', 'line-height:1.1;', html)
-            return html
-
-        page_htmls = []
+        page_divs = []
         for page in pages:
-            html = _strip_margins(page.get("translated_html", ""))
-            page_htmls.append(f'<div class="doc-page">{html}</div>')
+            html = page.get("translated_html", "")
+            page_divs.append(f'<div class="doc-page">{html}</div>')
 
-        full_html = f"""<!DOCTYPE html>
-<html>
+        full_html = """<!DOCTYPE html>
+<html lang="en">
 <head>
-<meta charset="utf-8"/>
+<meta charset="UTF-8"/>
 <style>
-  @page {{ margin: 1cm 1.5cm; size: A4; }}
-  body {{ font-family: "Times New Roman", Times, serif; font-size: 7.5pt; color: #000; line-height: 1.1; }}
-  .doc-page {{ page-break-after: always; }}
-  .doc-page:last-child {{ page-break-after: avoid; }}
-  table {{ width: 100%; border-collapse: collapse; font-size: 7pt; table-layout: fixed; }}
-  td, th {{ vertical-align: top; word-wrap: break-word; overflow: hidden; padding: 1px 2px; }}
-  p {{ margin: 0; padding: 0; line-height: 1.1; }}
-  div {{ margin: 0; padding: 0; }}
+  *, *::before, *::after {{ box-sizing: border-box; }}
+  @page {{
+    size: A4;
+    margin: 18mm 20mm 18mm 22mm;
+    @bottom-right {{
+      content: counter(page);
+      font-family: 'Times New Roman', Times, serif;
+      font-size: 10pt;
+    }}
+  }}
+  @page :first {{ @bottom-right {{ content: ""; }} }}
+  body {{
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 10pt;
+    line-height: 1.5;
+    color: #000;
+    margin: 0;
+    padding: 0;
+  }}
+  .doc-page {{
+    page-break-after: always;
+  }}
+  .doc-page:last-child {{
+    page-break-after: avoid;
+  }}
+  table {{
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 9pt;
+    margin-bottom: 6px;
+  }}
+  td, th {{
+    vertical-align: top;
+    word-wrap: break-word;
+    padding: 3px 5px;
+  }}
+  p {{
+    margin-top: 0;
+    margin-bottom: 6px;
+  }}
 </style>
 </head>
-<body>{"".join(page_htmls)}</body>
-</html>"""
+<body>{pages_content}</body>
+</html>""".format(pages_content="".join(page_divs))
 
-        pdf_buffer = io.BytesIO()
-        pisa_status = pisa.CreatePDF(full_html.encode("utf-8"), dest=pdf_buffer, encoding="utf-8")
-        if pisa_status.err:
-            raise HTTPException(status_code=500, detail="PDF generation failed")
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as tmp_html:
+            tmp_html.write(full_html)
+            tmp_html_path = tmp_html.name
 
-        pdf_bytes = pdf_buffer.getvalue()
+        try:
+            pdf_bytes = WeasyHTML(filename=tmp_html_path).write_pdf()
+        finally:
+            os.unlink(tmp_html_path)
+
         base_name = (result.get("original_filename") or "document").rsplit(".", 1)[0]
         out_filename = f"{base_name}_translated.pdf"
 
@@ -443,23 +482,75 @@ async def api_images_to_pdf(files: list[UploadFile] = File(...)):
 # ── Word → PDF ────────────────────────────────────────────────────────────────
 @app.post("/api/word-to-pdf")
 async def api_word_to_pdf(file: UploadFile = File(...)):
+    """Convert DOCX/DOC to PDF via mammoth (HTML) → WeasyPrint, no LibreOffice needed."""
     try:
+        import mammoth
+        from weasyprint import HTML as WeasyHTML
         import tempfile, os
-        from docx2pdf import convert
+
         content = await file.read()
-        suffix = ".docx" if (file.filename or "").endswith(".docx") else ".doc"
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_in:
-            tmp_in.write(content)
-            tmp_in_path = tmp_in.name
-        tmp_out_path = tmp_in_path.replace(suffix, ".pdf")
+        result = mammoth.convert_to_html(io.BytesIO(content))
+        body_html = result.value  # HTML string
+
+        full_html = f"""<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8"/>
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; }}
+  @page {{
+    size: A4;
+    margin: 25mm 20mm 20mm 25mm;
+    @bottom-right {{
+      content: counter(page);
+      font-family: 'Times New Roman', Times, serif;
+      font-size: 10pt;
+    }}
+  }}
+  body {{
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 12pt;
+    line-height: 1.5;
+    color: #000;
+    margin: 0;
+    padding: 0;
+  }}
+  p {{ margin-top: 0; margin-bottom: 8pt; }}
+  h1, h2, h3, h4, h5, h6 {{
+    font-family: 'Times New Roman', Times, serif;
+    page-break-after: avoid;
+    margin-top: 14pt;
+    margin-bottom: 6pt;
+  }}
+  table {{
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 10pt;
+    font-size: 11pt;
+  }}
+  td, th {{
+    border: 1px solid #000;
+    padding: 4pt 6pt;
+    vertical-align: top;
+    word-wrap: break-word;
+  }}
+  img {{ max-width: 100%; height: auto; }}
+  ul, ol {{ margin: 0 0 8pt 20pt; padding: 0; }}
+  li {{ margin-bottom: 3pt; }}
+</style>
+</head>
+<body>{body_html}</body>
+</html>"""
+
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as tmp:
+            tmp.write(full_html)
+            tmp_path = tmp.name
+
         try:
-            convert(tmp_in_path, tmp_out_path)
-            with open(tmp_out_path, "rb") as f:
-                pdf_bytes = f.read()
+            pdf_bytes = WeasyHTML(filename=tmp_path).write_pdf()
         finally:
-            os.unlink(tmp_in_path)
-            if os.path.exists(tmp_out_path):
-                os.unlink(tmp_out_path)
+            os.unlink(tmp_path)
+
         base = (file.filename or "document").rsplit(".", 1)[0]
         return StreamingResponse(
             io.BytesIO(pdf_bytes),

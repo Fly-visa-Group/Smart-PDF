@@ -185,6 +185,8 @@ const MergeWorkspace = ({ initialFiles, onCancel }) => {
         // ── Files mode: send all files in order ──────────────────────────
         const formData = new FormData();
         files.forEach(f => formData.append('files', f.file, f.name + '.' + f.extension));
+        formData.append('rotations', JSON.stringify(files.map(f => f.rotation || 0)));
+        formData.append('output_name', files[0]?.name || 'merged');
         const res = await fetch(`${API_URL}/api/merge`, { method: 'POST', body: formData });
         if (!res.ok) {
           const err = await res.json().catch(() => ({ detail: 'Lỗi không xác định' }));
@@ -202,11 +204,13 @@ const MergeWorkspace = ({ initialFiles, onCancel }) => {
         const manifest = selectedPages.map(p => ({
           file_index: fileIdToIdx[p.fileId],
           page: p.pageNum,
+          rotation: p.rotation || 0,
         }));
 
         const formData = new FormData();
         uniqueFiles.forEach(f => formData.append('files', f.file, f.name + '.' + f.extension));
         formData.append('manifest', JSON.stringify(manifest));
+        formData.append('output_name', uniqueFiles[0]?.name || 'merged');
 
         const res = await fetch(`${API_URL}/api/merge-pages`, { method: 'POST', body: formData });
         if (!res.ok) {

@@ -3,7 +3,7 @@ PDF → Word (DOCX) Converter.
 - Text tiếng Việt dùng get_text("dict") để PyMuPDF tự merge glyph.
 - Bảng biểu dùng word-level spatial lookup để có khoảng trắng đúng.
 - Dòng trong cùng block ghép bằng space (soft-wrap), không dùng \n cứng.
-- Fallback RapidOCR cho trang scan, load model 1 lần duy nhất (global).
+- OCR cho trang scan: Tesseract (vie+eng) → RapidOCR fallback.
 """
 
 import io
@@ -13,6 +13,60 @@ from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 GLOBAL_OCR_ENGINE = None
+TESSERACT_AVAILABLE = None  # None = unchecked, True/False after first check
+
+
+def _try_tesseract_ocr(pix_bytes: bytes, zoom: float) -> list:
+    """
+    Dùng Tesseract với vie+eng, group words theo (block_num, par_num, line_num),
+    trả về list (x0,y0,x1,y1,text) theo tọa độ PDF gốc (đã chia zoom).
+    """
+    global TESSERACT_AVAILABLE
+    if TESSERACT_AVAILABLE is False:
+        return []
+    try:
+        import pytesseract
+        from PIL import Image
+
+        pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        img = Image.open(io.BytesIO(pix_bytes))
+        data = pytesseract.image_to_data(
+            img, lang="vie+eng",
+            output_type=pytesseract.Output.DICT,
+            config="--psm 6",
+        )
+        TESSERACT_AVAILABLE = True
+
+        # Group words by (block_num, par_num, line_num)
+        lines: dict = {}
+        n = len(data["text"])
+        for i in range(n):
+            txt = (data["text"][i] or "").strip()
+            if not txt or int(data["conf"][i]) < 30:
+                continue
+            key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+            x, y, w, h = data["left"][i], data["top"][i], data["width"][i], data["height"][i]
+            lines.setdefault(key, {"words": [], "x0": x, "y0": y, "x1": x + w, "y1": y + h})
+            entry = lines[key]
+            entry["words"].append(txt)
+            entry["x0"] = min(entry["x0"], x)
+            entry["y0"] = min(entry["y0"], y)
+            entry["x1"] = max(entry["x1"], x + w)
+            entry["y1"] = max(entry["y1"], y + h)
+
+        results = []
+        for key in sorted(lines.keys()):
+            e = lines[key]
+            text = " ".join(e["words"])
+            results.append((
+                e["x0"] / zoom, e["y0"] / zoom,
+                e["x1"] / zoom, e["y1"] / zoom,
+                text,
+            ))
+        return results
+    except Exception:
+        TESSERACT_AVAILABLE = False
+        return []
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -166,25 +220,18 @@ def parse_pdf_to_blocks(pdf_bytes: bytes) -> dict:
         paragraphs = []
 
         if needs_ocr:
-            if GLOBAL_OCR_ENGINE is None:
-                from rapidocr_onnxruntime import RapidOCR
-                GLOBAL_OCR_ENGINE = RapidOCR()
-
             zoom = 2.0
             pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
-            ocr_result, _ = GLOBAL_OCR_ENGINE(pix.tobytes("png"))
-            if ocr_result:
-                for box, text, _ in ocr_result:
-                    t_str = text.strip()
-                    if not t_str:
-                        continue
-                    xs = [p[0] for p in box]
-                    ys = [p[1] for p in box]
-                    x0, y0 = min(xs) / zoom, min(ys) / zoom
-                    x1, y1 = max(xs) / zoom, max(ys) / zoom
+            pix_bytes = pix.tobytes("png")
+
+            # Thử Tesseract trước (hỗ trợ tiếng Việt có dấu)
+            tess_results = _try_tesseract_ocr(pix_bytes, zoom)
+
+            if tess_results:
+                for x0, y0, x1, y1, t_str in tess_results:
                     if _inside_table([x0, y0, x1, y1], table_bboxes):
                         continue
-                    h = y1 - y0
+                    h = max(y1 - y0, 6)
                     size = round(h * 0.75, 1)
                     paragraphs.append({
                         "type": "paragraph",
@@ -197,6 +244,37 @@ def parse_pdf_to_blocks(pdf_bytes: bytes) -> dict:
                                              "italic": False, "size": size,
                                              "color": None}]}],
                     })
+            else:
+                # Fallback: RapidOCR
+                global GLOBAL_OCR_ENGINE
+                if GLOBAL_OCR_ENGINE is None:
+                    from rapidocr_onnxruntime import RapidOCR
+                    GLOBAL_OCR_ENGINE = RapidOCR()
+                ocr_result, _ = GLOBAL_OCR_ENGINE(pix_bytes)
+                if ocr_result:
+                    for box, text, _ in ocr_result:
+                        t_str = text.strip()
+                        if not t_str:
+                            continue
+                        xs = [p[0] for p in box]
+                        ys = [p[1] for p in box]
+                        x0, y0 = min(xs) / zoom, min(ys) / zoom
+                        x1, y1 = max(xs) / zoom, max(ys) / zoom
+                        if _inside_table([x0, y0, x1, y1], table_bboxes):
+                            continue
+                        h = max(y1 - y0, 6)
+                        size = round(h * 0.75, 1)
+                        paragraphs.append({
+                            "type": "paragraph",
+                            "bbox": [x0, y0, x1, y1],
+                            "align": _detect_align(x0, x1, page_width),
+                            "is_bold": size > 14,
+                            "is_heading": size > 14,
+                            "font_size": size,
+                            "lines": [{"runs": [{"text": t_str, "bold": size > 14,
+                                                 "italic": False, "size": size,
+                                                 "color": None}]}],
+                        })
             paragraphs = _merge_paragraph_blocks(paragraphs, page_width)
 
         else:
